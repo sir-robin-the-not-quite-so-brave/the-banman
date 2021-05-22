@@ -47,6 +47,7 @@ import java.util.stream.Stream;
 public class Bot implements Callable<Integer> {
 
     private static final Logger LOGGER = LogManager.getLogger();
+    private static final Logger COMMAND_LOGGER = LogManager.getLogger("command");
 
     @Option(names = {"-t", "--token"}, required = true)
     private String discordToken;
@@ -176,6 +177,8 @@ public class Bot implements Callable<Integer> {
         final String[] parts = message.getContent().split("\\s+");
         if (parts.length == 0 || !parts[0].equalsIgnoreCase(prefix))
             return Mono.empty();
+
+        COMMAND_LOGGER.info("{}", message.getContent());
 
         final String command = Optional.of(parts)
                                        .filter(p -> p.length >= 2)
