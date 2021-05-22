@@ -2,6 +2,8 @@ package cbm.server.imp;
 
 import cbm.server.db.BansDatabase;
 import cbm.server.model.Ban;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.lib.Constants;
@@ -15,8 +17,6 @@ import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.treewalk.filter.OrTreeFilter;
 import org.eclipse.jgit.treewalk.filter.PathFilter;
 import org.jetbrains.annotations.NotNull;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
@@ -28,7 +28,7 @@ import java.util.ListIterator;
 
 public class GitImport {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(GitImport.class);
+    private static final Logger LOGGER = LogManager.getLogger();
 
     public static void main(String[] args) {
         final FileRepositoryBuilder builder = new FileRepositoryBuilder()

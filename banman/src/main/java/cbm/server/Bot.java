@@ -18,9 +18,9 @@ import discord4j.core.event.domain.lifecycle.ReadyEvent;
 import discord4j.core.event.domain.message.MessageCreateEvent;
 import discord4j.core.object.entity.Message;
 import discord4j.core.object.entity.User;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -46,7 +46,7 @@ import java.util.stream.Stream;
 @Command(name = "Bot", mixinStandardHelpOptions = true, version = "0.1")
 public class Bot implements Callable<Integer> {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(Bot.class);
+    private static final Logger LOGGER = LogManager.getLogger();
 
     @Option(names = {"-t", "--token"}, required = true)
     private String discordToken;
@@ -121,7 +121,8 @@ public class Bot implements Callable<Integer> {
             client.getEventDispatcher().on(ReadyEvent.class)
                   .subscribe(event -> {
                       final User self = event.getSelf();
-                      LOGGER.info("Logged in as {}#{}%n", self.getUsername(), self.getDiscriminator());
+                      LOGGER.info("Logged in as {}#{}. Command prefix is {}",
+                                  self.getUsername(), self.getDiscriminator(), prefix);
                   });
 
             client.getEventDispatcher().on(MessageCreateEvent.class)

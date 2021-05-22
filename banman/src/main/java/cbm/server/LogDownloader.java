@@ -4,9 +4,9 @@ import cbm.server.model.Ban;
 import com.ibm.icu.text.CharsetDetector;
 import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -17,7 +17,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 public class LogDownloader {
-    private static final Logger LOGGER = LoggerFactory.getLogger(LogDownloader.class);
+    private static final Logger LOGGER = LogManager.getLogger();
 
     private static final Pattern NET_ID_BAN_PATTERN = Pattern.compile("BannedIDs=\\(Uid=\\(A=(\\d+),B=17825793\\)\\)");
     private static final Pattern BAN_PATTERN =

@@ -14,10 +14,10 @@ import jetbrains.exodus.entitystore.PersistentEntityStores;
 import jetbrains.exodus.entitystore.StoreTransaction;
 import jetbrains.exodus.util.CompressBackupUtil;
 import jetbrains.exodus.util.LightOutputStream;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -42,7 +42,7 @@ import java.util.stream.Stream;
 import static java.util.stream.Collectors.toMap;
 
 public class BansDatabase implements AutoCloseable {
-    private static final Logger LOGGER = LoggerFactory.getLogger(BansDatabase.class);
+    private static final Logger LOGGER = LogManager.getLogger();
     private static final String CURRENT_BAN = "CurrentBan";
     private static final String OFFLINE_BAN = "OfflineBan";
     private static final String LOG_ENTRY = "LogEntry";
