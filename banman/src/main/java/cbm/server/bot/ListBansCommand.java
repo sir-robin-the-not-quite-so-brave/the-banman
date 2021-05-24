@@ -10,8 +10,10 @@ import reactor.core.publisher.Mono;
 import reactor.util.function.Tuples;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -86,9 +88,12 @@ public class ListBansCommand implements BotCommand {
     private static Stream<String> banLines(OfflineBan offlineBan, SteamID steamID, OffsetDateTime now,
                                            Map<String, Ban> currentBans) {
 
+        final OffsetDateTime enactedTime = Optional.ofNullable(offlineBan.getEnactedTime())
+                                                   .map(instant -> OffsetDateTime.ofInstant(instant, ZoneId.of("UTC")))
+                                                   .orElse(now);
         final String banLine = "```\n" + BanGenerator.banLine(steamID,
                                                               offlineBan.getDuration().toSeconds(),
-                                                              now,
+                                                              enactedTime,
                                                               offlineBan.getPlayerName(),
                                                               offlineBan.getReason()) + "\n```";
 

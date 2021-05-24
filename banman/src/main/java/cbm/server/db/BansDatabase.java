@@ -199,6 +199,7 @@ public class BansDatabase implements AutoCloseable {
 
         return new OfflineBan.Builder()
                 .setId(ban.getId())
+                .setEnactedTime(Instant.now())
                 .setDuration(Duration.ofDays(7))
                 .setPlayerName(playerName)
                 .setReason("Converted from broken NetID ban.")
@@ -371,6 +372,7 @@ public class BansDatabase implements AutoCloseable {
     private OfflineBan asOfflineBan(Entity entity) {
         return new OfflineBan.Builder()
                 .setId(getProperty(entity, "player-id"))
+                .setEnactedTime(getProperty(entity, "enacted-time"))
                 .setDuration(getProperty(entity, "duration"))
                 .setPlayerName(getProperty(entity, "player-name"))
                 .setReason(getProperty(entity, "reason"))
@@ -401,6 +403,7 @@ public class BansDatabase implements AutoCloseable {
 
     private void saveOfflineBan(OfflineBan ban, Entity entity) {
         setProperty(entity, "player-id", ban.getId());
+        setProperty(entity, "enacted-time", ban.getEnactedTime());
         setProperty(entity, "duration", ban.getDuration());
         setProperty(entity, "player-name", ban.getPlayerName());
         setProperty(entity, "reason", ban.getReason());
