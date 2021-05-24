@@ -16,6 +16,7 @@ import jetbrains.exodus.util.CompressBackupUtil;
 import jetbrains.exodus.util.LightOutputStream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.lucene.queryparser.classic.ParseException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import reactor.core.publisher.Flux;
@@ -24,6 +25,9 @@ import reactor.core.scheduler.Schedulers;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -38,6 +42,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import static java.util.stream.Collectors.toMap;
 
@@ -83,9 +88,28 @@ public class BansDatabase implements AutoCloseable {
     };
 
     private final PersistentEntityStore entityStore;
+    private final SearchIndex searchIndex;
 
-    public BansDatabase(String dir) {
+    public BansDatabase(String dir) throws IOException {
         this.entityStore = new CustomTypesPersistentEntityStore(PersistentEntityStores.newInstance(dir), REGISTRAR);
+        final Path lucene = Path.of(dir, "lucene");
+        final boolean isNew = Files.notExists(lucene);
+        this.searchIndex = new SearchIndex(lucene);
+        if (isNew) {
+            LOGGER.info("Indexing all existing bans ...");
+            indexBans();
+        }
+    }
+
+    public Flux<Ban> queryBans(String queryString, int maxHits) {
+        return Flux.defer(() -> {
+            try {
+                return Flux.fromIterable(searchIndex.query(queryString, maxHits))
+                           .subscribeOn(Schedulers.elastic());
+            } catch (ParseException | IOException e) {
+                return Flux.error(e);
+            }
+        });
     }
 
     public Stats storeBans(Instant timestamp, Stream<Ban> bans) {
@@ -126,6 +150,7 @@ public class BansDatabase implements AutoCloseable {
                 }
             }
 
+            final List<Ban> addedBans = new ArrayList<>();
             for (Ban ban : banMap.values()) {
                 final Entity entity = currentBans.get(ban.getId());
                 if (isSameBan(ban, entity))
@@ -151,6 +176,14 @@ public class BansDatabase implements AutoCloseable {
                 added.incrementAndGet();
 
                 saveBan(ban, txn.newEntity(CURRENT_BAN));
+                addedBans.add(ban);
+            }
+
+            // Index the added bans
+            try {
+                searchIndex.index(addedBans.stream());
+            } catch (IOException e) {
+                LOGGER.warn("Failed to index bans", e);
             }
 
             setTimestamp(txn, timestamp);
@@ -310,6 +343,22 @@ public class BansDatabase implements AutoCloseable {
         });
     }
 
+    private void indexBans() {
+        entityStore.executeInReadonlyTransaction(txn -> {
+            final EntityIterable entities = txn.getAll(LOG_ENTRY);
+            final Stream<Ban> banStream =
+                    StreamSupport.stream(entities::spliterator, 0, false)
+                                 .map(this::asBanLogEntry)
+                                 .filter(banLogEntry -> "add".equals(banLogEntry.getAction()))
+                                 .map(BanLogEntry::getBan);
+            try {
+                searchIndex.index(banStream);
+            } catch (IOException e) {
+                LOGGER.warn("Failed to index bans", e);
+            }
+        });
+    }
+
     public Flux<Ban> getCurrentBans() {
         return Flux.defer(() -> Flux.fromIterable(getCurrentBansSync())
                                     .subscribeOn(Schedulers.elastic()));
@@ -422,8 +471,9 @@ public class BansDatabase implements AutoCloseable {
     }
 
     @Override
-    public void close() {
+    public void close() throws IOException {
         entityStore.close();
+        searchIndex.close();
     }
 
     @SuppressWarnings("unused")
@@ -433,6 +483,12 @@ public class BansDatabase implements AutoCloseable {
         String getAction();
 
         Ban getBan();
+    }
+
+    public interface Stats {
+        int numAdded();
+
+        int numRemoved();
     }
 
     @SuppressWarnings("unused")
@@ -470,11 +526,5 @@ public class BansDatabase implements AutoCloseable {
         public String getBannedUntil() {
             return ban.getBannedUntil().toString();
         }
-    }
-
-    public interface Stats {
-        int numAdded();
-
-        int numRemoved();
     }
 }

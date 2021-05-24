@@ -8,6 +8,7 @@ import cbm.server.bot.ListBansCommand;
 import cbm.server.bot.LogCommand;
 import cbm.server.bot.PingCommand;
 import cbm.server.bot.ProfileCommand;
+import cbm.server.bot.SearchCommand;
 import cbm.server.bot.RemoveBanCommand;
 import cbm.server.db.BansDatabase;
 import cbm.server.model.Ban;
@@ -79,7 +80,7 @@ public class Bot implements Callable<Integer> {
     }
 
     @Override
-    public Integer call() {
+    public Integer call() throws IOException {
         final ScheduledExecutorService executorService = Executors.newSingleThreadScheduledExecutor();
         final LogDownloader logDownloader = new LogDownloader(hostname, logPath, username, password);
 
@@ -107,6 +108,7 @@ public class Bot implements Callable<Integer> {
                                 new ProfileCommand(),
                                 new BanCommand(),
                                 new LogCommand(bansDatabase),
+                                new SearchCommand(bansDatabase),
                                 new AddBanCommand(bansDatabase),
                                 new RemoveBanCommand(bansDatabase),
                                 new ListBansCommand(bansDatabase));
