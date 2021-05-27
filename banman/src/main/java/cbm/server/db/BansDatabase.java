@@ -17,6 +17,7 @@ import jetbrains.exodus.util.LightOutputStream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.queryparser.classic.ParseException;
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import reactor.core.publisher.Flux;
@@ -38,19 +39,23 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 import static java.util.stream.Collectors.toMap;
+import static jetbrains.exodus.core.crypto.MessageDigestUtil.MD5;
 
 public class BansDatabase implements AutoCloseable {
     private static final Logger LOGGER = LogManager.getLogger();
     private static final String CURRENT_BAN = "CurrentBan";
     private static final String OFFLINE_BAN = "OfflineBan";
     private static final String LOG_ENTRY = "LogEntry";
+    private static final String UNIQUE_BAN = "UniqueBan";
     private static final ComparableBinding INSTANT_BINDING = new ComparableBinding() {
         @SuppressWarnings("rawtypes")
         @Override
@@ -101,17 +106,6 @@ public class BansDatabase implements AutoCloseable {
         }
     }
 
-    public Flux<Ban> queryBans(String queryString, int maxHits) {
-        return Flux.defer(() -> {
-            try {
-                return Flux.fromIterable(searchIndex.query(queryString, maxHits))
-                           .subscribeOn(Schedulers.elastic());
-            } catch (ParseException | IOException e) {
-                return Flux.error(e);
-            }
-        });
-    }
-
     public Stats storeBans(Instant timestamp, Stream<Ban> bans) {
         return storeBans(timestamp, bans, false);
     }
@@ -150,7 +144,7 @@ public class BansDatabase implements AutoCloseable {
                 }
             }
 
-            final List<Ban> addedBans = new ArrayList<>();
+            final Set<UniqueBan> addedBans = new HashSet<>();
             for (Ban ban : banMap.values()) {
                 final Entity entity = currentBans.get(ban.getId());
                 if (isSameBan(ban, entity))
@@ -176,15 +170,11 @@ public class BansDatabase implements AutoCloseable {
                 added.incrementAndGet();
 
                 saveBan(ban, txn.newEntity(CURRENT_BAN));
-                addedBans.add(ban);
+                addedBans.add(new UniqueBan(ban));
             }
 
             // Index the added bans
-            try {
-                searchIndex.index(addedBans.stream());
-            } catch (IOException e) {
-                LOGGER.warn("Failed to index bans", e);
-            }
+            index(txn, addedBans);
 
             setTimestamp(txn, timestamp);
 
@@ -223,6 +213,25 @@ public class BansDatabase implements AutoCloseable {
                 }
             };
         });
+    }
+
+    private void index(StoreTransaction txn, Set<UniqueBan> addedBans) {
+        final Map<String, Ban> bans =
+                addedBans.stream()
+                         .filter(uniqueBan -> !exists(txn, uniqueBan))
+                         .collect(toMap(uniqueBan -> saveUniqueBan(uniqueBan,
+                                                                   txn.newEntity(UNIQUE_BAN)).getId().toString(),
+                                        UniqueBan::getBan));
+        try {
+            searchIndex.index(bans);
+        } catch (IOException e) {
+            LOGGER.warn("Failed to index bans", e);
+        }
+    }
+
+    private boolean exists(StoreTransaction txn, UniqueBan uniqueBan) {
+        final EntityIterable entities = txn.find(UNIQUE_BAN, "ban-id", uniqueBan.id);
+        return !entities.isEmpty();
     }
 
     private OfflineBan convertToOffline(Ban ban) {
@@ -299,6 +308,27 @@ public class BansDatabase implements AutoCloseable {
                                     .subscribeOn(Schedulers.elastic()));
     }
 
+    public SearchResponse<Ban> searchBansSync(SearchRequest request) throws ParseException, IOException {
+        final SearchResponse<String> idsResponse = searchIndex.search(request);
+        return entityStore.computeInReadonlyTransaction(txn -> {
+            final List<Ban> results = idsResponse.results
+                                              .stream()
+                                              .map(txn::toEntityId)
+                                              .map(txn::getEntity)
+                                              .map(this::asBan)
+                                              .collect(Collectors.toList());
+            return new SearchResponse<>(idsResponse.getFrom(),
+                                        idsResponse.getTotal(),
+                                        results,
+                                        idsResponse.getContinueAfter());
+        });
+    }
+
+    public Mono<SearchResponse<Ban>> searchBans(SearchRequest request) {
+        return Mono.defer(() -> Mono.fromCallable(() -> searchBansSync(request))
+                                    .subscribeOn(Schedulers.elastic()));
+    }
+
     public List<BanLogEntry> getBanHistorySync(SteamID steamID) {
         return entityStore.computeInReadonlyTransaction(txn -> {
             final List<BanLogEntry> entries = new ArrayList<>();
@@ -344,15 +374,28 @@ public class BansDatabase implements AutoCloseable {
     }
 
     private void indexBans() {
-        entityStore.executeInReadonlyTransaction(txn -> {
+        entityStore.executeInTransaction(txn -> {
+            // Reset the unique bans
+            for (Entity entity : txn.getAll(UNIQUE_BAN))
+                entity.delete();
+
             final EntityIterable entities = txn.getAll(LOG_ENTRY);
-            final Stream<Ban> banStream =
+            final Set<UniqueBan> uniqueBans =
                     StreamSupport.stream(entities::spliterator, 0, false)
                                  .map(this::asBanLogEntry)
                                  .filter(banLogEntry -> "add".equals(banLogEntry.getAction()))
-                                 .map(BanLogEntry::getBan);
+                                 .map(BanLogEntry::getBan)
+                                 .map(UniqueBan::new)
+                                 .collect(Collectors.toSet());
+
+            final Map<String, Ban> bans = new HashMap<>();
+            for (UniqueBan uniqueBan : uniqueBans) {
+                final Entity entity = saveUniqueBan(uniqueBan, txn.newEntity(UNIQUE_BAN));
+                bans.put(entity.getId().toString(), uniqueBan.ban);
+            }
+
             try {
-                searchIndex.index(banStream);
+                searchIndex.index(bans);
             } catch (IOException e) {
                 LOGGER.warn("Failed to index bans", e);
             }
@@ -441,13 +484,15 @@ public class BansDatabase implements AutoCloseable {
                 && Objects.equals(duration, ban.getDuration());
     }
 
-    private void saveBan(Ban ban, Entity entity) {
+    @Contract("_, !null -> param2")
+    private Entity saveBan(Ban ban, Entity entity) {
         setProperty(entity, "player-id", ban.getId());
         setProperty(entity, "enacted-time", ban.getEnactedTime());
         setProperty(entity, "duration", ban.getDuration());
         setProperty(entity, "ip-policy", ban.getIpPolicy());
         setProperty(entity, "player-name", ban.getPlayerName());
         setProperty(entity, "reason", ban.getReason());
+        return entity;
     }
 
     private void saveOfflineBan(OfflineBan ban, Entity entity) {
@@ -456,6 +501,12 @@ public class BansDatabase implements AutoCloseable {
         setProperty(entity, "duration", ban.getDuration());
         setProperty(entity, "player-name", ban.getPlayerName());
         setProperty(entity, "reason", ban.getReason());
+    }
+
+    @Contract("_, !null -> param2")
+    private Entity saveUniqueBan(UniqueBan uniqueBan, Entity entity) {
+        setProperty(entity, "ban-id", uniqueBan.id);
+        return saveBan(uniqueBan.ban, entity);
     }
 
     @SuppressWarnings("unchecked")
@@ -483,6 +534,46 @@ public class BansDatabase implements AutoCloseable {
         String getAction();
 
         Ban getBan();
+    }
+
+    static class UniqueBan {
+        private final @NotNull String id;
+        private final @NotNull Ban ban;
+
+        public UniqueBan(@NotNull Ban ban) {
+            this.id = MD5(String.format("%s|%s|%s|%s|%s", ban.getId(), ban.getEnactedTime(), ban.getDuration(),
+                                        ban.getPlayerName(), ban.getReason()));
+            this.ban = ban;
+        }
+
+        public @NotNull String getId() {
+            return id;
+        }
+
+        public @NotNull Ban getBan() {
+            return ban;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            final UniqueBan uniqueBan = (UniqueBan) o;
+            return id.equals(uniqueBan.id);
+        }
+
+        @Override
+        public int hashCode() {
+            return id.hashCode();
+        }
+
+        @Override
+        public String toString() {
+            return new StringJoiner(", ", UniqueBan.class.getSimpleName() + "[", "]")
+                           .add("id='" + id + "'")
+                           .add("ban=" + ban)
+                           .toString();
+        }
     }
 
     public interface Stats {
