@@ -16,7 +16,7 @@
         </RollingFile>
     </Appenders>
     <Loggers>
-<!--        <Logger name="cbm.server" level="debug" additivity="false">-->
+<!--        <Logger name="cbm.server.db.SearchIndex" level="debug" additivity="true">-->
 <!--            <AppenderRef ref="LogToConsole"/>-->
 <!--        </Logger>-->
         <Root level="info">
