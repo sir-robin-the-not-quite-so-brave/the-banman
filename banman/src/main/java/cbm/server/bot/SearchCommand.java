@@ -12,9 +12,9 @@ import org.jetbrains.annotations.NotNull;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 public class SearchCommand implements BotCommand {
     private static final String[] DESCRIPTION = new String[]{
@@ -78,36 +78,20 @@ public class SearchCommand implements BotCommand {
     }
 
     private Iterable<String> resultsToStrings(String queryString, SearchResponse<Ban> response) {
-        final String prefix = String.format("**Results (%d - %d of %d):**\n```\n",
+        final String header = String.format("**Results (%d - %d of %d):**",
                                             response.getFrom() + 1, response.getTo(), response.getTotal());
-        final String continueAfter = response.getContinueAfter();
-        final String suffix =
-                continueAfter != null ? String.format("```\n||>%s %s<||", continueAfter, queryString) : "```";
-        final int suffixLen = suffix.getBytes(StandardCharsets.UTF_8).length;
+        final MessageComposer.Builder builder = new MessageComposer.Builder()
+                                                        .setHeader(header)
+                                                        .setPrefix("```")
+                                                        .setSuffix("```");
+        Optional.ofNullable(response.getContinueAfter())
+                .map(ca -> String.format("||>%s %s<||", ca, queryString))
+                .ifPresent(builder::setFooter);
 
-        StringBuilder sb = new StringBuilder(prefix);
-        int currentLen = prefix.getBytes(StandardCharsets.UTF_8).length;
-
-        final List<String> responses = new ArrayList<>();
-        @NotNull List<Ban> results = response.results;
-        final int count = results.size();
-        for (int i = 0; i < count; i++) {
-            final String banString = results.get(i).toString();
-            final int banLen = banString.getBytes(StandardCharsets.UTF_8).length + 1;
-            final int closeLen = i == count - 1 ? suffixLen : 4;
-            if (currentLen + banLen + closeLen >= 2000) {
-                sb.append("```\n");
-                responses.add(sb.toString());
-                sb = new StringBuilder("```\n");
-                currentLen = 4;
-            }
-            sb.append(banString).append('\n');
-            currentLen += banLen;
-        }
-
-        sb.append(suffix);
-        responses.add(sb.toString());
-
-        return responses;
+        final MessageComposer composer = builder.build();
+        final List<String> bans = response.results.stream()
+                                                  .map(Ban::toString)
+                                                  .collect(Collectors.toList());
+        return composer.compose(bans);
     }
 }
