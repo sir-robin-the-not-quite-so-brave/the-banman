@@ -1,7 +1,8 @@
 package cbm.server.bot;
 
+import discord4j.core.object.entity.Message;
 import org.jetbrains.annotations.NotNull;
-import reactor.core.publisher.Mono;
+import reactor.core.publisher.Flux;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -64,7 +65,7 @@ public class HelpCommand implements BotCommand {
     }
 
     @Override
-    public @NotNull Mono<String> execute(String params) {
+    public @NotNull Flux<String> execute(String params, Message message) {
         final String cmd = params.trim().toLowerCase();
         final String u = usage.get(cmd);
         final Stream<String> commands;
@@ -73,7 +74,8 @@ public class HelpCommand implements BotCommand {
         else
             commands = usage.values().stream();
 
-        return Mono.just(Stream.concat(commands, Stream.of(FOOTER))
-                               .collect(Collectors.joining("\n", "**Usage**:", "")));
+        final MessageComposer composer = new MessageComposer.Builder().build();
+        return Flux.fromIterable(composer.compose(Stream.concat(commands, Stream.of(FOOTER))
+                                                        .collect(Collectors.toList())));
     }
 }

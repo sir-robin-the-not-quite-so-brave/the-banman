@@ -9,8 +9,11 @@ import discord4j.core.object.MessageReference;
 import discord4j.core.object.entity.Message;
 import discord4j.core.object.entity.channel.MessageChannel;
 import org.jetbrains.annotations.NotNull;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 public class SearchCommand implements BotCommand {
@@ -35,25 +38,27 @@ public class SearchCommand implements BotCommand {
     }
 
     @Override
-    public @NotNull Mono<String> execute(String params, Message message) {
+    public @NotNull Flux<String> execute(String params, Message message) {
         return message.getMessageReference()
                       .flatMap(MessageReference::getMessageId)
                       .map(id -> nextPage(params, message.getChannel(), id))
                       .orElseGet(() -> bansDatabase.searchBans(new SearchRequest(params))
-                                                   .map(response -> resultsToString(params, response)));
+                                                   .flatMapIterable(response -> resultsToStrings(params, response)));
     }
 
     @NotNull
-    private Mono<String> nextPage(String params, Mono<MessageChannel> channel, Snowflake id) {
-        return channel.flatMap(ch -> ch.getMessageById(id)
-                                       .flatMap(msg -> {
-                                           final String content = msg.getContent();
-                                           final SearchRequest request = nextRequest(content);
-                                           if (request == null)
-                                               return Mono.just("Error");
-                                           return bansDatabase.searchBans(request)
-                                                              .map(response -> resultsToString(params, response));
-                                       }));
+    private Flux<String> nextPage(String params, Mono<MessageChannel> channel, Snowflake id) {
+        return channel.flatMapMany(ch -> ch.getMessageById(id)
+                                           .flatMapMany(msg -> {
+                                               final String content = msg.getContent();
+                                               final SearchRequest request = nextRequest(content);
+                                               if (request == null)
+                                                   return Flux.just("Error");
+                                               return bansDatabase.searchBans(request)
+                                                                  .flatMapIterable(response ->
+                                                                                           resultsToStrings(params,
+                                                                                                            response));
+                                           }));
     }
 
     private SearchRequest nextRequest(String content) {
@@ -72,15 +77,21 @@ public class SearchCommand implements BotCommand {
         return new SearchRequest(queryString, continueFrom);
     }
 
-    private String resultsToString(String queryString, SearchResponse<Ban> response) {
-        final String prefix = String.format("**Results (%d - %d of %d):**\n```\n",
+    private Iterable<String> resultsToStrings(String queryString, SearchResponse<Ban> response) {
+        final String header = String.format("**Results (%d - %d of %d):**",
                                             response.getFrom() + 1, response.getTo(), response.getTotal());
-        final String continueAfter = response.getContinueAfter();
-        final String suffix =
-                continueAfter != null ? String.format("```\n||>%s %s<||", continueAfter, queryString) : "```";
-        return response.results
-                       .stream()
-                       .map(Ban::toString)
-                       .collect(Collectors.joining("\n", prefix, suffix));
+        final MessageComposer.Builder builder = new MessageComposer.Builder()
+                                                        .setHeader(header)
+                                                        .setPrefix("```")
+                                                        .setSuffix("```");
+        Optional.ofNullable(response.getContinueAfter())
+                .map(ca -> String.format("||>%s %s<||", ca, queryString))
+                .ifPresent(builder::setFooter);
+
+        final MessageComposer composer = builder.build();
+        final List<String> bans = response.results.stream()
+                                                  .map(Ban::toString)
+                                                  .collect(Collectors.toList());
+        return composer.compose(bans);
     }
 }

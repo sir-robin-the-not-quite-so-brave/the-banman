@@ -6,6 +6,7 @@ import cbm.server.model.OfflineBan;
 import discord4j.core.object.entity.Message;
 import discord4j.core.object.entity.User;
 import org.jetbrains.annotations.NotNull;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.OffsetDateTime;
@@ -15,8 +16,8 @@ import java.time.temporal.ChronoUnit;
 public class AddBanCommand implements BotCommand {
 
     private static final String[] DESCRIPTION = new String[]{
-            "*id-or-url* *period* *reason* - Add an offline. The *reason* will automatically contain the name of the " +
-                    "admin, who's adding the ban."
+            "*id-or-url* *period* *reason* - Add an offline ban. The *reason* will automatically contain the name of " +
+                    "the admin, who's adding the ban."
     };
 
     private final BansDatabase bansDatabase;
@@ -36,7 +37,7 @@ public class AddBanCommand implements BotCommand {
     }
 
     @Override
-    public @NotNull Mono<String> execute(String params, Message message) {
+    public @NotNull Flux<String> execute(String params, Message message) {
         try {
             final String[] split = params.split("\\s+", 3);
             if (split.length != 3)
@@ -52,19 +53,19 @@ public class AddBanCommand implements BotCommand {
                              .orElse("");
 
             return Bot.resolveSteamID(split[0])
-                      .flatMap(id -> Bot.getPlayerName(id)
-                                        .switchIfEmpty(Mono.just("player_" + id.steamID64()))
-                                        .map(name -> new OfflineBan.Builder()
-                                                .setId(Long.toString(id.steamID64()))
-                                                .setDurationSeconds(seconds)
-                                                .setPlayerName(name)
-                                                .setReason(reason)
-                                                .build())
-                                        .flatMap(bansDatabase::addOfflineBan)
-                                        .map(added -> added ? "Ban successfully saved"
-                                                            : "There is an existing offline ban for this player"));
+                      .flatMapMany(id -> Bot.getPlayerName(id)
+                                            .switchIfEmpty(Mono.just("player_" + id.steamID64()))
+                                            .map(name -> new OfflineBan.Builder()
+                                                                 .setId(Long.toString(id.steamID64()))
+                                                                 .setDurationSeconds(seconds)
+                                                                 .setPlayerName(name)
+                                                                 .setReason(reason)
+                                                                 .build())
+                                            .flatMap(bansDatabase::addOfflineBan)
+                                            .map(added -> added ? "Ban successfully saved"
+                                                                : "There is an existing offline ban for this player"));
         } catch (RuntimeException e) {
-            return Mono.error(e);
+            return Flux.error(e);
         }
     }
 }

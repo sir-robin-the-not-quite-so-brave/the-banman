@@ -6,6 +6,7 @@ import cbm.server.bot.BotCommand;
 import cbm.server.bot.HelpCommand;
 import cbm.server.bot.ListBansCommand;
 import cbm.server.bot.LogCommand;
+import cbm.server.bot.MessageComposer;
 import cbm.server.bot.PingCommand;
 import cbm.server.bot.ProfileCommand;
 import cbm.server.bot.SearchCommand;
@@ -31,6 +32,7 @@ import reactor.util.function.Tuples;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Map;
@@ -164,8 +166,16 @@ public class Bot implements Callable<Integer> {
 
     @NotNull
     private Mono<Message> replyTo(Message message, String response) {
+        final String rs;
+        if (response.getBytes(StandardCharsets.UTF_8).length > MessageComposer.MAX_MESSAGE_LENGTH) {
+            LOGGER.error("Response message too long!", new RuntimeException());
+            rs = response.substring(0, MessageComposer.MAX_MESSAGE_LENGTH - 3) + "...";
+        } else {
+            rs = response;
+        }
+
         return message.getChannel()
-                      .flatMap(channel -> channel.createMessage(spec -> spec.setContent(response)
+                      .flatMap(channel -> channel.createMessage(spec -> spec.setContent(rs)
                                                                             .setMessageReference(message.getId())));
     }
 

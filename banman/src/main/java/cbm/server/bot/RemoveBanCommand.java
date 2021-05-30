@@ -32,7 +32,7 @@ public class RemoveBanCommand implements BotCommand {
         final String id = params.strip();
         return Bot.resolveSteamID(id)
                   .flatMap(bansDatabase::removeOfflineBan)
-                  .map(removed -> removed ? "Offline ban removed"
-                                          : "Couldn't find an offline ban for: " + id);
+                  .map(removed -> removed ? "*Offline ban removed*"
+                                          : "*Couldn't find an offline ban for: *" + id);
     }
 }
