@@ -5,19 +5,21 @@ import cbm.server.SteamID;
 import cbm.server.db.BansDatabase;
 import cbm.server.model.Ban;
 import cbm.server.model.OfflineBan;
+import discord4j.core.object.entity.Message;
 import org.jetbrains.annotations.NotNull;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.function.Tuples;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 public class ListBansCommand implements BotCommand {
 
@@ -44,8 +46,8 @@ public class ListBansCommand implements BotCommand {
     }
 
     @Override
-    public @NotNull Mono<String> execute(String params) {
-        final BiFunction<List<OfflineBan>, Map<String, Ban>, String> toString;
+    public @NotNull Flux<String> execute(String params, Message message) {
+        final BiFunction<List<OfflineBan>, Map<String, Ban>, List<String>> toString;
         switch (params.strip().toLowerCase()) {
             case "ini":
                 toString = ListBansCommand::fileBans;
@@ -56,7 +58,7 @@ public class ListBansCommand implements BotCommand {
                 break;
 
             default:
-                return Mono.just("Unknown format: " + params);
+                return Flux.just("Unknown format: " + params);
         }
 
         final Mono<List<OfflineBan>> offlineBans = bansDatabase.getOfflineBans()
@@ -69,24 +71,29 @@ public class ListBansCommand implements BotCommand {
                                              .collect(Collectors.toMap(Ban::getId, Function.identity())));
 
         return Mono.zip(offlineBans, currentBans)
-                   .map(t -> toString.apply(t.getT1(), t.getT2()));
+                   .flatMapIterable(t -> toString.apply(t.getT1(), t.getT2()));
     }
 
-    private static String fileBans(List<OfflineBan> offlineBans, Map<String, Ban> currentBans) {
+    private static List<String> fileBans(List<OfflineBan> offlineBans, Map<String, Ban> currentBans) {
         if (offlineBans.isEmpty())
-            return "No offline bans";
+            return Collections.singletonList("No offline bans");
 
         final OffsetDateTime now = OffsetDateTime.now();
 
-        return offlineBans.stream()
-                          .map(b -> Tuples.of(b, SteamID.steamID(b.getId())))
-                          .filter(t -> t.getT2().isPresent())
-                          .flatMap(t -> banLines(t.getT1(), t.getT2().get(), now, currentBans))
-                          .collect(Collectors.joining("\n"));
+        final MessageComposer composer = new MessageComposer.Builder().build();
+
+        final List<String> collect1 =
+                offlineBans.stream()
+                           .map(b -> Tuples.of(b, SteamID.steamID(b.getId())))
+                           .filter(t -> t.getT2().isPresent())
+                           .map(t -> banLines(t.getT1(), t.getT2().get(), now, currentBans))
+                           .collect(Collectors.toList());
+
+        return composer.compose(collect1);
     }
 
-    private static Stream<String> banLines(OfflineBan offlineBan, SteamID steamID, OffsetDateTime now,
-                                           Map<String, Ban> currentBans) {
+    private static String banLines(OfflineBan offlineBan, SteamID steamID, OffsetDateTime now,
+                                   Map<String, Ban> currentBans) {
 
         final OffsetDateTime enactedTime = Optional.ofNullable(offlineBan.getEnactedTime())
                                                    .map(instant -> OffsetDateTime.ofInstant(instant, ZoneId.of("UTC")))
@@ -100,7 +107,7 @@ public class ListBansCommand implements BotCommand {
         final Ban ban = currentBans.get(offlineBan.getId());
 
         if (ban == null)
-            return Stream.of(banLine);
+            return banLine;
 
         final String comment;
         if (ban.isNetIDBan())
@@ -108,24 +115,32 @@ public class ListBansCommand implements BotCommand {
                                     steamID.uid());
         else
             comment = String.format("Replace previous ban for `NetId=(Uid=(A=%d,B=17825793))`", steamID.uid());
-        return Stream.of("", comment, banLine);
+        return String.join("\n", "", comment, banLine);
     }
 
-    private static String defaultBans(List<OfflineBan> offlineBans, Map<String, Ban> currentBans) {
+    private static List<String> defaultBans(List<OfflineBan> offlineBans, Map<String, Ban> currentBans) {
         if (offlineBans.isEmpty())
-            return "No offline bans";
-        return offlineBans.stream()
-                          .flatMap(offlineBan -> defaultBan(offlineBan, currentBans))
-                          .collect(Collectors.joining("\n", "**Bans:**\n```diff\n", "```"));
+            return Collections.singletonList("*No offline bans*");
+
+        final MessageComposer composer = new MessageComposer.Builder()
+                                                 .setHeader("**Bans:**")
+                                                 .setPrefix("```diff")
+                                                 .setSuffix("```")
+                                                 .build();
+
+        return composer.compose(offlineBans.stream()
+                                           .map(offlineBan -> defaultBan(offlineBan, currentBans))
+                                           .collect(Collectors.toList()));
+
     }
 
-    private static Stream<String> defaultBan(OfflineBan offlineBan, Map<String, Ban> currentBans) {
+    private static String defaultBan(OfflineBan offlineBan, Map<String, Ban> currentBans) {
         final Ban ban = currentBans.get(offlineBan.getId());
 
         if (ban == null)
-            return Stream.of("+ " + offlineBan);
+            return "+ " + offlineBan;
 
-        return Stream.of("- " + ban,
-                         "+ " + offlineBan);
+        return String.join("\n", "- " + ban,
+                           "+ " + offlineBan);
     }
 }

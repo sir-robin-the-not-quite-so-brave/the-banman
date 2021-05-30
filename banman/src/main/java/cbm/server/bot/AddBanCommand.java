@@ -16,8 +16,8 @@ import java.time.temporal.ChronoUnit;
 public class AddBanCommand implements BotCommand {
 
     private static final String[] DESCRIPTION = new String[]{
-            "*id-or-url* *period* *reason* - Add an offline. The *reason* will automatically contain the name of the " +
-                    "admin, who's adding the ban."
+            "*id-or-url* *period* *reason* - Add an offline ban. The *reason* will automatically contain the name of " +
+                    "the admin, who's adding the ban."
     };
 
     private final BansDatabase bansDatabase;
