@@ -82,14 +82,14 @@ public class ListBansCommand implements BotCommand {
 
         final MessageComposer composer = new MessageComposer.Builder().build();
 
-        final List<String> collect1 =
+        final List<String> banInfos =
                 offlineBans.stream()
                            .map(b -> Tuples.of(b, SteamID.steamID(b.getId())))
                            .filter(t -> t.getT2().isPresent())
                            .map(t -> banLines(t.getT1(), t.getT2().get(), now, currentBans))
                            .collect(Collectors.toList());
 
-        return composer.compose(collect1);
+        return composer.compose(banInfos);
     }
 
     private static String banLines(OfflineBan offlineBan, SteamID steamID, OffsetDateTime now,
