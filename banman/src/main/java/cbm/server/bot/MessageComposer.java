@@ -2,6 +2,7 @@ package cbm.server.bot;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
@@ -41,6 +42,10 @@ public class MessageComposer {
         this.footerLen = this.footer.getBytes(StandardCharsets.UTF_8).length;
         this.prefixLen = this.prefix.getBytes(StandardCharsets.UTF_8).length;
         this.suffixLen = this.suffix.getBytes(StandardCharsets.UTF_8).length;
+    }
+
+    public List<String> compose(String... results) {
+        return compose(Arrays.asList(results));
     }
 
     public List<String> compose(List<String> results) {

@@ -3,12 +3,16 @@ package cbm.server.bot;
 import cbm.server.Bot;
 import cbm.server.SteamID;
 import cbm.server.db.BansDatabase;
+import cbm.server.db.BansDatabase.BanLogEntry;
 import cbm.server.model.Ban;
+import discord4j.core.object.entity.Message;
 import org.jetbrains.annotations.NotNull;
-import reactor.core.publisher.Mono;
+import reactor.core.publisher.Flux;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 public class LogCommand implements BotCommand {
 
@@ -34,41 +38,53 @@ public class LogCommand implements BotCommand {
     }
 
     @Override
-    public @NotNull Mono<String> execute(String params) {
+    public @NotNull Flux<String> execute(String params, Message message) {
         final String id = params.strip();
+
         return Bot.resolveSteamID(id)
-                  .flatMap(steamID -> bansDatabase.getBanHistory(steamID)
-                                                  .collectList()
-                                                  .flatMap(banHistory -> Mono.just(toString(steamID, banHistory))));
+                  .flatMapMany(steamID -> bansDatabase.getBanHistory(steamID)
+                                                      .collectList()
+                                                      .map(entries -> toString(steamID, entries))
+                                                      .flatMapMany(Flux::fromIterable));
     }
 
-    private static String toString(SteamID steamID, List<BansDatabase.BanLogEntry> banHistory) {
+    private static List<String> toString(SteamID steamID, List<BanLogEntry> banHistory) {
+        final MessageComposer composer =
+                new MessageComposer.Builder()
+                        .setHeader("**Ban history** " + steamID.profileUrl() + ":")
+                        .setPrefix("```diff")
+                        .setSuffix("```")
+                        .build();
+
         if (banHistory.isEmpty())
-            return "No previous bans.";
+            return composer.compose("*No previous bans.*");
 
-        final StringBuilder sb = new StringBuilder("**Ban history** ");
-        sb.append(steamID.profileUrl()).append(":\n```diff");
-        for (var banLogEntry : banHistory) {
-            switch (banLogEntry.getAction()) {
-                case "add":
-                    sb.append("\n+ ");
-                    break;
+        final List<String> history =
+                banHistory.stream()
+                          .map(LogCommand::logEntryToString)
+                          .collect(Collectors.toList());
+        return composer.compose(history);
+    }
 
-                case "remove":
-                    sb.append("\n- ");
-                    break;
-            }
-            final Ban ban = banLogEntry.getBan();
-            sb.append(banLogEntry.getDetectedAt()).append(": \"")
-              .append(ban.getPlayerName()).append("\" banned from ")
-              .append(ban.getEnactedTime())
-              .append(" until ").append(ban.getBannedUntil())
-              .append(" (duration ");
-            append(sb, ban.getDuration());
-            sb.append(") for \"").append(ban.getReason()).append("\"");
+    private static String logEntryToString(BanLogEntry entry) {
+        final StringBuilder sb = new StringBuilder();
+        switch (entry.getAction()) {
+            case "add":
+                sb.append("\n+ ");
+                break;
+
+            case "remove":
+                sb.append("\n- ");
+                break;
         }
-        sb.append("```");
-
+        final Ban ban = entry.getBan();
+        sb.append(entry.getDetectedAt()).append(": \"")
+          .append(ban.getPlayerName()).append("\" banned from ")
+          .append(ban.getEnactedTime())
+          .append(" until ").append(ban.getBannedUntil())
+          .append(" (duration ");
+        append(sb, Optional.ofNullable(ban.getDuration()).orElse(Duration.ZERO));
+        sb.append(") for \"").append(ban.getReason()).append("\"");
         return sb.toString();
     }
 
