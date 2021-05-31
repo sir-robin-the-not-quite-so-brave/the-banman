@@ -70,11 +70,11 @@ public class LogCommand implements BotCommand {
         final StringBuilder sb = new StringBuilder();
         switch (entry.getAction()) {
             case "add":
-                sb.append("\n+ ");
+                sb.append("+ ");
                 break;
 
             case "remove":
-                sb.append("\n- ");
+                sb.append("- ");
                 break;
         }
         final Ban ban = entry.getBan();

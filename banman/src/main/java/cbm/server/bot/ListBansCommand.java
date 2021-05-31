@@ -76,11 +76,9 @@ public class ListBansCommand implements BotCommand {
 
     private static List<String> fileBans(List<OfflineBan> offlineBans, Map<String, Ban> currentBans) {
         if (offlineBans.isEmpty())
-            return Collections.singletonList("No offline bans");
+            return Collections.singletonList("*No offline bans*");
 
         final OffsetDateTime now = OffsetDateTime.now();
-
-        final MessageComposer composer = new MessageComposer.Builder().build();
 
         final List<String> banInfos =
                 offlineBans.stream()
@@ -89,6 +87,7 @@ public class ListBansCommand implements BotCommand {
                            .map(t -> banLines(t.getT1(), t.getT2().get(), now, currentBans))
                            .collect(Collectors.toList());
 
+        final MessageComposer composer = new MessageComposer.Builder().build();
         return composer.compose(banInfos);
     }
 
@@ -140,7 +139,6 @@ public class ListBansCommand implements BotCommand {
         if (ban == null)
             return "+ " + offlineBan;
 
-        return String.join("\n", "- " + ban,
-                           "+ " + offlineBan);
+        return "- " + ban + "\n+ " + offlineBan;
     }
 }
