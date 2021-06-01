@@ -132,7 +132,8 @@ public class LogCommand implements BotCommand {
                 break;
         }
         final Ban ban = entry.getBan();
-        sb.append(entry.getDetectedAt()).append(": \"")
+        sb.append(entry.getDetectedAt()).append(" [")
+          .append(ban.getId()).append("]: \"")
           .append(ban.getPlayerName()).append("\" banned from ")
           .append(ban.getEnactedTime())
           .append(" until ").append(ban.getBannedUntil())
