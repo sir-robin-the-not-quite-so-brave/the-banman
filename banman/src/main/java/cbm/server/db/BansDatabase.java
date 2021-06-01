@@ -346,6 +346,32 @@ public class BansDatabase implements AutoCloseable {
                                     .subscribeOn(Schedulers.elastic()));
     }
 
+    /**
+     * Returns ban log entries detected between {@code from} (inclusive) and {@code to} (exclusive).
+     */
+    public List<BanLogEntry> getBanHistorySync(Instant from, Instant to) {
+        return entityStore.computeInReadonlyTransaction(txn -> {
+            final List<BanLogEntry> entries = new ArrayList<>();
+            // The search here is inclusive on both ends
+            final EntityIterable entities = txn.find(LOG_ENTRY, "detected-at", from, to);
+            for (Entity entity : entities) {
+                final BanLogEntry banLogEntry = asBanLogEntry(entity);
+                // Make the search exclusive on the right end
+                if (banLogEntry.getDetectedAt().isBefore(to))
+                    entries.add(banLogEntry);
+            }
+            return entries;
+        });
+    }
+
+    /**
+     * Returns ban log entries detected between {@code from} (inclusive) and {@code to} (exclusive).
+     */
+    public Flux<BanLogEntry> getBanHistory(Instant from, Instant to) {
+        return Flux.defer(() -> Flux.fromIterable(getBanHistorySync(from, to))
+                                    .subscribeOn(Schedulers.elastic()));
+    }
+
     public @Nullable Instant getLastUpdateSync() {
         return entityStore.computeInReadonlyTransaction(txn -> {
             final var iterable = txn.find("TIMESTAMP", "for", "current-bans");

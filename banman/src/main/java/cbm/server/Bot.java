@@ -29,6 +29,7 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.util.function.Tuple2;
 import reactor.util.function.Tuple3;
 import reactor.util.function.Tuples;
 
@@ -37,7 +38,10 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -176,20 +180,73 @@ public class Bot implements Callable<Integer> {
         if (now.getHour() != 8)
             return;
 
-        bansDatabase.getOfflineBans()
-                    .collectList()
-                    .filter(list -> !list.isEmpty())
-                    .map(list -> String.format("There are %,d offline bans that need attention. " +
-                                                       "Please use `%s list-bans` to see them.",
-                                               list.size(), prefix))
-                    .flatMapMany(msg -> Flux.fromIterable(allowedDiscordChannels)
-                                            .map(Snowflake::of)
-                                            .flatMap(id -> client.getChannelById(id)
-                                                                 .filter(MessageChannel.class::isInstance)
-                                                                 .cast(MessageChannel.class)
-                                                                 .flatMap(channel -> channel.createMessage(msg))
-                                                                 .then()))
-                    .blockLast();
+        final Mono<String> statsMessage =
+                getYesterdaysStats(bansDatabase)
+                        .map(stats -> String.format("There were %,d bans added and %,d bans removed yesterday.",
+                                                    stats.numAdded(), stats.numRemoved()));
+
+        final Mono<String> offlineMessage =
+                bansDatabase.getOfflineBans()
+                            .collectList()
+                            .filter(list -> !list.isEmpty())
+                            .map(list -> String.format("\n\nThere are %,d offline bans that need attention. " +
+                                                               "Please use `%s list-bans` to see them.",
+                                                       list.size(),
+                                                       prefix))
+                            .defaultIfEmpty("");
+
+        Mono.zip(statsMessage, offlineMessage)
+            .map(t -> t.getT1() + t.getT2())
+            .flatMapMany(msg -> Flux.fromIterable(allowedDiscordChannels)
+                                    .map(Snowflake::of)
+                                    .flatMap(id -> client.getChannelById(id)
+                                                         .filter(MessageChannel.class::isInstance)
+                                                         .cast(MessageChannel.class)
+                                                         .flatMap(channel -> channel.createMessage(msg))
+                                                         .then()))
+            .blockLast();
+    }
+
+    private Mono<BansDatabase.Stats> getYesterdaysStats(BansDatabase bansDatabase) {
+        final OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        final OffsetDateTime to = now.withHour(0).withMinute(0).withSecond(0).withNano(0);
+        final OffsetDateTime from = to.minusDays(1);
+        return bansDatabase.getBanHistory(from.toInstant(), to.toInstant())
+                           .collectList()
+                           .map(this::stats);
+    }
+
+    private BansDatabase.Stats stats(List<BansDatabase.BanLogEntry> logEntries) {
+        final Tuple2<Integer, Integer> stats =
+                logEntries.stream()
+                          .reduce(Tuples.of(0, 0),
+                                  (st, entry) -> {
+                                      switch (entry.getAction()) {
+                                          case "add":
+                                              return st.mapT1(n -> n + 1);
+
+                                          case "remove":
+                                              return st.mapT2(n -> n + 1);
+
+                                          default:
+                                              LOGGER.error("Unknown log entry action: {}", entry.getAction());
+                                              return st;
+                                      }
+                                  },
+                                  (st1, st2) -> Tuples.of(st1.getT1() + st2.getT1(),
+                                                          st1.getT2() + st2.getT2()));
+
+        return new BansDatabase.Stats() {
+            @Override
+            public int numAdded() {
+                return stats.getT1();
+            }
+
+            @Override
+            public int numRemoved() {
+                return stats.getT2();
+            }
+        };
     }
 
     @NotNull
