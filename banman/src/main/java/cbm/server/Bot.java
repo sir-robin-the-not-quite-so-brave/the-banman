@@ -9,8 +9,8 @@ import cbm.server.bot.LogCommand;
 import cbm.server.bot.MessageComposer;
 import cbm.server.bot.PingCommand;
 import cbm.server.bot.ProfileCommand;
-import cbm.server.bot.SearchCommand;
 import cbm.server.bot.RemoveBanCommand;
+import cbm.server.bot.SearchCommand;
 import cbm.server.db.BansDatabase;
 import cbm.server.model.Ban;
 import discord4j.common.util.Snowflake;
@@ -20,12 +20,14 @@ import discord4j.core.event.domain.lifecycle.ReadyEvent;
 import discord4j.core.event.domain.message.MessageCreateEvent;
 import discord4j.core.object.entity.Message;
 import discord4j.core.object.entity.User;
+import discord4j.core.object.entity.channel.MessageChannel;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.function.Tuple3;
 import reactor.util.function.Tuples;
@@ -34,6 +36,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Map;
 import java.util.Optional;
@@ -123,6 +126,9 @@ public class Bot implements Callable<Integer> {
 
             assert client != null;
 
+            executorService.scheduleAtFixedRate(() -> showStats(bansDatabase, client),
+                                                30, 3600, TimeUnit.SECONDS);
+
             client.getEventDispatcher().on(ReadyEvent.class)
                   .subscribe(event -> {
                       final User self = event.getSelf();
@@ -162,6 +168,28 @@ public class Bot implements Callable<Integer> {
         } catch (IOException e) {
             LOGGER.warn("Failed to update the database", e);
         }
+    }
+
+    private void showStats(BansDatabase bansDatabase, GatewayDiscordClient client) {
+        // This method is called once per hour. We want to show the message daily between 8 AM and 9 AM local time.
+        final LocalTime now = LocalTime.now();
+        if (now.getHour() != 8)
+            return;
+
+        bansDatabase.getOfflineBans()
+                    .collectList()
+                    .filter(list -> !list.isEmpty())
+                    .map(list -> String.format("There are %,d offline bans that need attention. " +
+                                                       "Please use `%s list-bans` to see them.",
+                                               list.size(), prefix))
+                    .flatMapMany(msg -> Flux.fromIterable(allowedDiscordChannels)
+                                            .map(Snowflake::of)
+                                            .flatMap(id -> client.getChannelById(id)
+                                                                 .filter(MessageChannel.class::isInstance)
+                                                                 .cast(MessageChannel.class)
+                                                                 .flatMap(channel -> channel.createMessage(msg))
+                                                                 .then()))
+                    .blockLast();
     }
 
     @NotNull
