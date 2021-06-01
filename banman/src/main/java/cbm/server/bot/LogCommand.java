@@ -1,7 +1,6 @@
 package cbm.server.bot;
 
 import cbm.server.Bot;
-import cbm.server.SteamID;
 import cbm.server.db.BansDatabase;
 import cbm.server.db.BansDatabase.BanLogEntry;
 import cbm.server.model.Ban;
@@ -10,6 +9,10 @@ import org.jetbrains.annotations.NotNull;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -17,7 +20,8 @@ import java.util.stream.Collectors;
 public class LogCommand implements BotCommand {
 
     private static final String[] DESCRIPTION = new String[]{
-            "*id-or-url* - Shows player's ban history."
+            "[-p] *id-or-url*  - Shows player's ban history.",
+            "-d [*yyyy-mm-dd*] - Show bans for given date."
     };
     private static final int SECONDS_PER_DAY = 24 * 3600;
 
@@ -39,19 +43,69 @@ public class LogCommand implements BotCommand {
 
     @Override
     public @NotNull Flux<String> execute(String params, Message message) {
-        final String id = params.strip();
+        final String strip = params.strip();
+        final String[] split = strip.split("\\s+");
+        if (split.length == 0)
+            return Flux.just(DESCRIPTION);
 
+        final String secondParam = Optional.of(split)
+                                      .filter(s -> s.length > 1)
+                                      .map(s -> s[1])
+                                      .orElse(null);
+
+        switch (split[0]) {
+            case "-d":
+                return banHistoryForDate(secondParam);
+
+            case "-p":
+                return banHistory(secondParam);
+
+            default:
+                return banHistory(split[0]);
+        }
+    }
+
+    private Flux<String> banHistoryForDate(String dateString) {
+        final LocalDate date = parse(dateString);
+        if (date == null)
+            return Flux.just("Invalid date '" + dateString + ". The format should be `yyyy-mm-dd`.");
+
+        final ZonedDateTime startOfDay = date.atStartOfDay(ZoneOffset.UTC);
+        final Instant from = startOfDay.toInstant();
+        final Instant to = startOfDay.plusDays(1).toInstant();
+
+        return bansDatabase.getBanHistory(from, to)
+                           .collectList()
+                           .map(entries -> toString("**Ban history for " + date + "**", entries))
+                           .flatMapMany(Flux::fromIterable);
+    }
+
+    private LocalDate parse(String dateString) {
+        if (dateString == null)
+            return LocalDate.now();
+
+        try {
+            return LocalDate.parse(dateString);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    @NotNull
+    private Flux<String> banHistory(String id) {
         return Bot.resolveSteamID(id)
                   .flatMapMany(steamID -> bansDatabase.getBanHistory(steamID)
                                                       .collectList()
-                                                      .map(entries -> toString(steamID, entries))
+                                                      .map(entries -> toString("**Ban history** "
+                                                                                       + steamID.profileUrl() + ":",
+                                                                               entries))
                                                       .flatMapMany(Flux::fromIterable));
     }
 
-    private static List<String> toString(SteamID steamID, List<BanLogEntry> banHistory) {
+    private static List<String> toString(String header, List<BanLogEntry> banHistory) {
         final MessageComposer composer =
                 new MessageComposer.Builder()
-                        .setHeader("**Ban history** " + steamID.profileUrl() + ":")
+                        .setHeader(header)
                         .setPrefix("```diff")
                         .setSuffix("```")
                         .build();

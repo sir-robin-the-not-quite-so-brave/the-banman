@@ -22,11 +22,13 @@ public class HelpCommand implements BotCommand {
     private static final String[] FOOTER = new String[]{
             "----",
             "**Parameters**:",
+            "- *[]*        - Parameters in brackets are optional.",
             "- *id-or-url* - This could be steamID (`STEAM_0:0:61887661`), steamID3 (`[U:1:123775322]`), " +
                     "steamID64 (`76561198084041050`), full profile URL or custom URL (`robin-the-not-quite-so-brave` " +
                     "or `https://steamcommunity.com/id/robin-the-not-quite-so-brave`).",
             "- *period*    - Ban period. Can be `P0D` - for permanent ban, `P7D` (or `P1W`) for 7 day, " +
-                    "`P2M` for 2 months, `P1Y` for 1 year. Or even `P1Y2M3W4D`."
+                    "`P2M` for 2 months, `P1Y` for 1 year. Or even `P1Y2M3W4D`.",
+            "- *yyyy-mm-dd* - Date. 2021-03-05 means 5th of March, 2021."
     };
 
     private final Map<String, String> usage;
