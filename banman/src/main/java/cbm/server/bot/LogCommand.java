@@ -21,7 +21,7 @@ public class LogCommand implements BotCommand {
 
     private static final String[] DESCRIPTION = new String[]{
             "[-p] *id-or-url*  - Shows player's ban history.",
-            "-d [*yyyy-mm-dd*] - Show bans for given date."
+            "[-d] [*yyyy-mm-dd*] - Show bans for given date."
     };
     private static final int SECONDS_PER_DAY = 24 * 3600;
 
@@ -44,29 +44,37 @@ public class LogCommand implements BotCommand {
     @Override
     public @NotNull Flux<String> execute(String params, Message message) {
         final String strip = params.strip();
+        if (strip.isEmpty())
+            return banHistoryForDate(null);
+
         final String[] split = strip.split("\\s+");
-        if (split.length == 0)
-            return Flux.just(DESCRIPTION);
 
-        final String secondParam = Optional.of(split)
-                                      .filter(s -> s.length > 1)
-                                      .map(s -> s[1])
-                                      .orElse(null);
+        final String firstParam = split[0];
 
-        switch (split[0]) {
+        if (split.length == 1) {
+            final LocalDate date = parseDate(firstParam);
+            if (date != null)
+                return banHistoryForDate(firstParam);
+            else
+                return banHistoryForUser(firstParam);
+        }
+
+        final String secondParam = split[1];
+
+        switch (firstParam) {
             case "-d":
                 return banHistoryForDate(secondParam);
 
             case "-p":
-                return banHistory(secondParam);
+                return banHistoryForUser(secondParam);
 
             default:
-                return banHistory(split[0]);
+                return banHistoryForUser(firstParam);
         }
     }
 
     private Flux<String> banHistoryForDate(String dateString) {
-        final LocalDate date = parse(dateString);
+        final LocalDate date = parseDate(dateString);
         if (date == null)
             return Flux.just("Invalid date '" + dateString + ". The format should be `yyyy-mm-dd`.");
 
@@ -80,7 +88,7 @@ public class LogCommand implements BotCommand {
                            .flatMapMany(Flux::fromIterable);
     }
 
-    private LocalDate parse(String dateString) {
+    private LocalDate parseDate(String dateString) {
         if (dateString == null)
             return LocalDate.now();
 
@@ -92,7 +100,7 @@ public class LogCommand implements BotCommand {
     }
 
     @NotNull
-    private Flux<String> banHistory(String id) {
+    private Flux<String> banHistoryForUser(String id) {
         return Bot.resolveSteamID(id)
                   .flatMapMany(steamID -> bansDatabase.getBanHistory(steamID)
                                                       .collectList()
@@ -111,7 +119,7 @@ public class LogCommand implements BotCommand {
                         .build();
 
         if (banHistory.isEmpty())
-            return composer.compose("*No previous bans.*");
+            return composer.compose("No bans found.");
 
         final List<String> history =
                 banHistory.stream()

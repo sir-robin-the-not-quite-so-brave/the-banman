@@ -177,7 +177,7 @@ public class Bot implements Callable<Integer> {
     private void showStats(BansDatabase bansDatabase, GatewayDiscordClient client) {
         // This method is called once per hour. We want to show the message daily between 8 AM and 9 AM local time.
         final LocalTime now = LocalTime.now();
-        if (now.getHour() != 8)
+        if (now.getHour() != 6)
             return;
 
         final Mono<String> statsMessage =
