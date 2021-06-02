@@ -36,6 +36,7 @@ import reactor.util.function.Tuples;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
@@ -130,8 +131,10 @@ public class Bot implements Callable<Integer> {
 
             assert client != null;
 
+            final Duration delay = getDelayUntil(LocalTime.parse("06:00:00"));
+            LOGGER.info("Delay to first stats: {}", delay);
             executorService.scheduleAtFixedRate(() -> showStats(bansDatabase, client),
-                                                30, 3600, TimeUnit.SECONDS);
+                                                delay.toSeconds(), 24 * 3600, TimeUnit.SECONDS);
 
             client.getEventDispatcher().on(ReadyEvent.class)
                   .subscribe(event -> {
@@ -155,6 +158,15 @@ public class Bot implements Callable<Integer> {
         }
     }
 
+    /**
+     * Compute the delay to the specified time (future).
+     */
+    private Duration getDelayUntil(LocalTime then) {
+        final LocalTime now = LocalTime.now();
+        final long daysToAdd = now.isAfter(then) ? 1 : 0;
+        return Duration.between(now, then).plusDays(daysToAdd);
+    }
+
     private void updateBans(LogDownloader logDownloader, BansDatabase bansDatabase) {
         final Instant lastUpdate = bansDatabase.getLastUpdateSync();
         LOGGER.info("Database is last updated at: {}", lastUpdate);
@@ -175,11 +187,6 @@ public class Bot implements Callable<Integer> {
     }
 
     private void showStats(BansDatabase bansDatabase, GatewayDiscordClient client) {
-        // This method is called once per hour. We want to show the message daily between 8 AM and 9 AM local time.
-        final LocalTime now = LocalTime.now();
-        if (now.getHour() != 6)
-            return;
-
         final Mono<String> statsMessage =
                 getYesterdaysStats(bansDatabase)
                         .map(stats -> String.format("There were %,d bans added and %,d bans removed yesterday.",
