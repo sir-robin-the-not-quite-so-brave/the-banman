@@ -9,8 +9,8 @@ import cbm.server.bot.LogCommand;
 import cbm.server.bot.MessageComposer;
 import cbm.server.bot.PingCommand;
 import cbm.server.bot.ProfileCommand;
-import cbm.server.bot.SearchCommand;
 import cbm.server.bot.RemoveBanCommand;
+import cbm.server.bot.SearchCommand;
 import cbm.server.db.BansDatabase;
 import cbm.server.model.Ban;
 import discord4j.common.util.Snowflake;
@@ -20,21 +20,29 @@ import discord4j.core.event.domain.lifecycle.ReadyEvent;
 import discord4j.core.event.domain.message.MessageCreateEvent;
 import discord4j.core.object.entity.Message;
 import discord4j.core.object.entity.User;
+import discord4j.core.object.entity.channel.MessageChannel;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.util.function.Tuple2;
 import reactor.util.function.Tuple3;
 import reactor.util.function.Tuples;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -123,6 +131,11 @@ public class Bot implements Callable<Integer> {
 
             assert client != null;
 
+            final Duration delay = getDelayUntil(LocalTime.parse("06:00:00"));
+            LOGGER.info("Delay to first stats: {}", delay);
+            executorService.scheduleAtFixedRate(() -> showStats(bansDatabase, client),
+                                                delay.toSeconds(), 24 * 3600, TimeUnit.SECONDS);
+
             client.getEventDispatcher().on(ReadyEvent.class)
                   .subscribe(event -> {
                       final User self = event.getSelf();
@@ -145,6 +158,15 @@ public class Bot implements Callable<Integer> {
         }
     }
 
+    /**
+     * Compute the delay to the specified time (future).
+     */
+    private Duration getDelayUntil(LocalTime then) {
+        final LocalTime now = LocalTime.now();
+        final long daysToAdd = now.isAfter(then) ? 1 : 0;
+        return Duration.between(now, then).plusDays(daysToAdd);
+    }
+
     private void updateBans(LogDownloader logDownloader, BansDatabase bansDatabase) {
         final Instant lastUpdate = bansDatabase.getLastUpdateSync();
         LOGGER.info("Database is last updated at: {}", lastUpdate);
@@ -162,6 +184,76 @@ public class Bot implements Callable<Integer> {
         } catch (IOException e) {
             LOGGER.warn("Failed to update the database", e);
         }
+    }
+
+    private void showStats(BansDatabase bansDatabase, GatewayDiscordClient client) {
+        final Mono<String> statsMessage =
+                getYesterdaysStats(bansDatabase)
+                        .map(stats -> String.format("There were %,d bans added and %,d bans removed yesterday.",
+                                                    stats.numAdded(), stats.numRemoved()));
+
+        final Mono<String> offlineMessage =
+                bansDatabase.getOfflineBans()
+                            .collectList()
+                            .filter(list -> !list.isEmpty())
+                            .map(list -> String.format("\n\nThere are %,d offline bans that need attention. " +
+                                                               "Please use `%s list-bans` to see them.",
+                                                       list.size(),
+                                                       prefix))
+                            .defaultIfEmpty("");
+
+        Mono.zip(statsMessage, offlineMessage)
+            .map(t -> t.getT1() + t.getT2())
+            .flatMapMany(msg -> Flux.fromIterable(allowedDiscordChannels)
+                                    .map(Snowflake::of)
+                                    .flatMap(id -> client.getChannelById(id)
+                                                         .filter(MessageChannel.class::isInstance)
+                                                         .cast(MessageChannel.class)
+                                                         .flatMap(channel -> channel.createMessage(msg))
+                                                         .then()))
+            .blockLast();
+    }
+
+    private Mono<BansDatabase.Stats> getYesterdaysStats(BansDatabase bansDatabase) {
+        final OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        final OffsetDateTime to = now.withHour(0).withMinute(0).withSecond(0).withNano(0);
+        final OffsetDateTime from = to.minusDays(1);
+        return bansDatabase.getBanHistory(from.toInstant(), to.toInstant())
+                           .collectList()
+                           .map(this::stats);
+    }
+
+    private BansDatabase.Stats stats(List<BansDatabase.BanLogEntry> logEntries) {
+        final Tuple2<Integer, Integer> stats =
+                logEntries.stream()
+                          .reduce(Tuples.of(0, 0),
+                                  (st, entry) -> {
+                                      switch (entry.getAction()) {
+                                          case "add":
+                                              return st.mapT1(n -> n + 1);
+
+                                          case "remove":
+                                              return st.mapT2(n -> n + 1);
+
+                                          default:
+                                              LOGGER.error("Unknown log entry action: {}", entry.getAction());
+                                              return st;
+                                      }
+                                  },
+                                  (st1, st2) -> Tuples.of(st1.getT1() + st2.getT1(),
+                                                          st1.getT2() + st2.getT2()));
+
+        return new BansDatabase.Stats() {
+            @Override
+            public int numAdded() {
+                return stats.getT1();
+            }
+
+            @Override
+            public int numRemoved() {
+                return stats.getT2();
+            }
+        };
     }
 
     @NotNull
