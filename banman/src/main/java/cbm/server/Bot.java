@@ -13,6 +13,8 @@ import cbm.server.bot.RemoveBanCommand;
 import cbm.server.bot.SearchCommand;
 import cbm.server.db.BansDatabase;
 import cbm.server.model.Ban;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import discord4j.common.util.Snowflake;
 import discord4j.core.DiscordClientBuilder;
 import discord4j.core.GatewayDiscordClient;
@@ -55,6 +57,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -90,6 +93,12 @@ public class Bot implements Callable<Integer> {
 
     @Option(names = {"--prefix"}, defaultValue = "!bm")
     private String prefix;
+
+    private final Cache<Snowflake, Boolean> cache =
+            Caffeine.newBuilder()
+                    .maximumSize(10_000)
+                    .expireAfterWrite(1, TimeUnit.MINUTES)
+                    .build();
 
     public static void main(String[] args) {
         final CommandLine commandLine = new CommandLine(new Bot());
@@ -352,12 +361,18 @@ public class Bot implements Callable<Integer> {
                                                                           .onErrorReturn(false))
                                                         .collect(Collectors.toList()),
                                               objects -> Arrays.asList(objects).contains(Boolean.TRUE) ? false : null)
-                                         .switchIfEmpty(ch.createMessage("You're not an admin. Shoo!")
-                                                          .flatMap(e -> {
-                                                              LOGGER.info("I told {} ({}) to piss off",
-                                                                          author.getUsername(), author.getId());
-                                                              return Mono.empty();
-                                                          })));
+                                         .switchIfEmpty(((Supplier<Mono<Boolean>>) () -> {
+                                             if (cache.getIfPresent(ch.getId()) != null)
+                                                 return Mono.empty();
+
+                                             return ch.createMessage("You're not an admin. Shoo!")
+                                                      .flatMap(msg -> {
+                                                          cache.put(ch.getId(), false);
+                                                          LOGGER.info("I told {} ({}) to piss off",
+                                                                      author.getUsername(), author.getId());
+                                                          return Mono.empty();
+                                                      });
+                                         }).get()));
     }
 
     private Mono<Boolean> isMemberWithRole(User user, Snowflake guildId, Set<Snowflake> allowedRoles) {
