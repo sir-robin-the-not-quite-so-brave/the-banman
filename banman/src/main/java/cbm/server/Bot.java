@@ -351,7 +351,13 @@ public class Bot implements Callable<Integer> {
                                                         .map(e -> isMemberWithRole(author, e.getKey(), e.getValue())
                                                                           .onErrorReturn(false))
                                                         .collect(Collectors.toList()),
-                                              objects -> Arrays.asList(objects).contains(Boolean.TRUE) ? false : null));
+                                              objects -> Arrays.asList(objects).contains(Boolean.TRUE) ? false : null)
+                                         .switchIfEmpty(ch.createMessage("You're not an admin. Shoo!")
+                                                          .flatMap(e -> {
+                                                              LOGGER.info("I told {} ({}) to piss off",
+                                                                          author.getUsername(), author.getId());
+                                                              return Mono.empty();
+                                                          })));
     }
 
     private Mono<Boolean> isMemberWithRole(User user, Snowflake guildId, Set<Snowflake> allowedRoles) {
