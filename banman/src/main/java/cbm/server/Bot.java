@@ -13,14 +13,18 @@ import cbm.server.bot.RemoveBanCommand;
 import cbm.server.bot.SearchCommand;
 import cbm.server.db.BansDatabase;
 import cbm.server.model.Ban;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import discord4j.common.util.Snowflake;
 import discord4j.core.DiscordClientBuilder;
 import discord4j.core.GatewayDiscordClient;
 import discord4j.core.event.domain.lifecycle.ReadyEvent;
 import discord4j.core.event.domain.message.MessageCreateEvent;
+import discord4j.core.object.entity.Member;
 import discord4j.core.object.entity.Message;
 import discord4j.core.object.entity.User;
 import discord4j.core.object.entity.channel.MessageChannel;
+import discord4j.core.object.entity.channel.PrivateChannel;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
@@ -42,6 +46,8 @@ import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -51,6 +57,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -69,6 +76,9 @@ public class Bot implements Callable<Integer> {
     @Option(names = {"-c", "--channel"}, arity = "1..*")
     private Set<String> allowedDiscordChannels;
 
+    @Option(names = {"-r", "--role"}, arity = "0..*")
+    private Set<String> allowedRoles;
+
     @Option(names = {"--host"}, required = true)
     private String hostname;
 
@@ -84,6 +94,12 @@ public class Bot implements Callable<Integer> {
     @Option(names = {"--prefix"}, defaultValue = "!bm")
     private String prefix;
 
+    private final Cache<Snowflake, Boolean> cache =
+            Caffeine.newBuilder()
+                    .maximumSize(10_000)
+                    .expireAfterWrite(1, TimeUnit.MINUTES)
+                    .build();
+
     public static void main(String[] args) {
         final CommandLine commandLine = new CommandLine(new Bot());
         commandLine.execute(args);
@@ -91,6 +107,16 @@ public class Bot implements Callable<Integer> {
 
     @Override
     public Integer call() throws IOException {
+        var roles =
+                Optional.ofNullable(allowedRoles)
+                        .orElse(Collections.emptySet())
+                        .stream()
+                        .map(s -> s.split(",", 2))
+                        .filter(a -> a.length == 2)
+                        .collect(Collectors.toMap(a -> Snowflake.of(a[0]),
+                                                  a -> Set.of(Snowflake.of(a[1])),
+                                                  Bot::union));
+
         final ScheduledExecutorService executorService = Executors.newSingleThreadScheduledExecutor();
         final LogDownloader logDownloader = new LogDownloader(hostname, logPath, username, password);
 
@@ -145,9 +171,7 @@ public class Bot implements Callable<Integer> {
 
             client.getEventDispatcher().on(MessageCreateEvent.class)
                   .map(MessageCreateEvent::getMessage)
-                  .filter(message -> channelIds.contains(message.getChannelId()))
-                  .filter(message -> message.getAuthor().map(user -> !user.isBot()).orElse(false))
-                  .flatMap(this::parse)
+                  .flatMap(message -> parse(message, channelIds, roles))
                   .flatMap(parsed -> botCommands.getOrDefault(parsed.getT2(), helpCommand)
                                                 .execute(parsed.getT3(), parsed.getT1())
                                                 .onErrorResume(t -> Mono.justOrEmpty(t.getMessage()))
@@ -277,25 +301,84 @@ public class Bot implements Callable<Integer> {
                      .collect(Collectors.toMap(command -> command.name().toLowerCase(), Function.identity()));
     }
 
-    private Mono<Tuple3<Message, String, String>> parse(Message message) {
-        final String[] parts = message.getContent().split("\\s+");
-        if (parts.length == 0 || !parts[0].equalsIgnoreCase(prefix))
+    private Mono<Tuple3<Message, String, String>> parse(Message message, Set<Snowflake> channelIds,
+                                                        Map<Snowflake, Set<Snowflake>> guildRoles) {
+
+        return requirePrefix(message, channelIds, guildRoles)
+                       .flatMap(requirePrefix -> {
+                           final String[] parts = message.getContent().split("\\s+");
+                           if (parts.length == 0)
+                               return Mono.empty();
+
+                           final boolean hasPrefix = parts[0].equalsIgnoreCase(prefix);
+
+                           if (requirePrefix && !hasPrefix)
+                               return Mono.empty();
+
+                           final int cmdIdx = hasPrefix ? 1 : 0;
+                           final int minLength = hasPrefix ? 2 : 1;
+
+                           COMMAND_LOGGER.info("{}", message.getContent());
+
+                           final String command = Optional.of(parts)
+                                                          .filter(p -> p.length >= minLength)
+                                                          .map(p -> p[cmdIdx])
+                                                          .map(String::toLowerCase)
+                                                          .orElse("help");
+
+                           final StringBuilder sb = new StringBuilder();
+                           for (int i = cmdIdx + 1; i < parts.length; i++)
+                               sb.append(" ").append(parts[i]);
+                           final String params = sb.toString().strip();
+
+                           return Mono.just(Tuples.of(message, command, params));
+                       });
+    }
+
+    /**
+     * @return Empty {@link Mono} if the message should be ignored, {@link Mono} containing {@code True} if the message
+     * should start with {@link #prefix}, or {@code False} if it doesn't have to.
+     */
+    private Mono<Boolean> requirePrefix(Message message, Set<Snowflake> channelIds,
+                                        Map<Snowflake, Set<Snowflake>> guildRoles) {
+
+        final Optional<User> optAuthor = message.getAuthor();
+        if (optAuthor.isEmpty())
             return Mono.empty();
 
-        COMMAND_LOGGER.info("{}", message.getContent());
+        final User author = optAuthor.get();
+        if (author.isBot())
+            return Mono.empty();
 
-        final String command = Optional.of(parts)
-                                       .filter(p -> p.length >= 2)
-                                       .map(p -> p[1])
-                                       .map(String::toLowerCase)
-                                       .orElse("help");
+        if (channelIds.contains(message.getChannelId()))
+            return Mono.just(true);
 
-        final StringBuilder sb = new StringBuilder();
-        for (int i = 2; i < parts.length; i++)
-            sb.append(" ").append(parts[i]);
-        final String params = sb.toString().strip();
+        return message.getChannel()
+                      .filter(ch -> ch instanceof PrivateChannel)
+                      .flatMap(ch -> Mono.zip(guildRoles.entrySet()
+                                                        .stream()
+                                                        .map(e -> isMemberWithRole(author, e.getKey(), e.getValue())
+                                                                          .onErrorReturn(false))
+                                                        .collect(Collectors.toList()),
+                                              objects -> Arrays.asList(objects).contains(Boolean.TRUE) ? false : null)
+                                         .switchIfEmpty(((Supplier<Mono<Boolean>>) () -> {
+                                             if (cache.getIfPresent(ch.getId()) != null)
+                                                 return Mono.empty();
 
-        return Mono.just(Tuples.of(message, command, params));
+                                             return ch.createMessage("You're not an admin. Shoo!")
+                                                      .flatMap(msg -> {
+                                                          cache.put(ch.getId(), false);
+                                                          LOGGER.info("I told {} ({}) to piss off",
+                                                                      author.getUsername(), author.getId());
+                                                          return Mono.empty();
+                                                      });
+                                         }).get()));
+    }
+
+    private Mono<Boolean> isMemberWithRole(User user, Snowflake guildId, Set<Snowflake> allowedRoles) {
+        return user.asMember(guildId)
+                   .map(Member::getRoleIds)
+                   .map(roles -> !intersection(roles, allowedRoles).isEmpty());
     }
 
     public static Mono<SteamID> resolveSteamID(String id) {
@@ -308,5 +391,16 @@ public class Bot implements Callable<Integer> {
         return SteamWeb.playerProfile(steamID.profileUrl())
                        .map(SteamWeb.Profile::getName)
                        .map(TextUtils::printable);
+    }
+
+    private static <T> @NotNull Set<T> union(@NotNull Set<T> s1, @NotNull Set<T> s2) {
+        return Stream.concat(s1.stream(), s2.stream())
+                     .collect(Collectors.toSet());
+    }
+
+    private static <T> @NotNull Set<T> intersection(@NotNull Set<T> s1, @NotNull Set<T> s2) {
+        return s1.stream()
+                 .filter(s2::contains)
+                 .collect(Collectors.toSet());
     }
 }
