@@ -1,29 +1,22 @@
 package cbm.server.bot;
 
 import cbm.server.Bot;
+import discord4j.core.object.entity.Message;
 import org.jetbrains.annotations.NotNull;
-import reactor.core.publisher.Mono;
+import picocli.CommandLine.Command;
+import picocli.CommandLine.Parameters;
+import reactor.core.publisher.Flux;
 
+@Command(name = "profile", header = "Show the *canonical* Steam profile URL")
 public class ProfileCommand implements BotCommand {
 
-    private static final String[] DESCRIPTION = new String[]{
-            "*id-or-url* - Gives the *canonical* URL to the Steam profile."
-    };
+    @Parameters(index = "0", paramLabel = "<id-or-url>", description = "Steam ID or profile URL")
+    private String idOrUrl;
 
     @Override
-    public @NotNull String name() {
-        return "profile";
-    }
-
-    @Override
-    public @NotNull String[] description() {
-        return DESCRIPTION;
-    }
-
-    @Override
-    public @NotNull Mono<String> execute(String params) {
-        final String id = params.strip();
-        return Bot.resolveSteamID(id)
-                  .map(steamID -> "**Profile URL:** " + steamID.profileUrl());
+    public @NotNull Flux<String> execute(@NotNull Message message) {
+        return Bot.resolveSteamID(idOrUrl)
+                  .map(steamID -> "**Profile URL:** " + steamID.profileUrl())
+                  .flux();
     }
 }

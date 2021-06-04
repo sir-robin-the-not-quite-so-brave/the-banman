@@ -7,6 +7,9 @@ import cbm.server.model.Ban;
 import cbm.server.model.OfflineBan;
 import discord4j.core.object.entity.Message;
 import org.jetbrains.annotations.NotNull;
+import picocli.CommandLine;
+import picocli.CommandLine.Command;
+import picocli.CommandLine.Option;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.function.Tuples;
@@ -14,6 +17,7 @@ import reactor.util.function.Tuples;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -21,13 +25,17 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+@Command(name = "list-bans", header = "Show the offline bans")
 public class ListBansCommand implements BotCommand {
 
-    private static final String[] DESCRIPTION = new String[]{
-            "[*format*] - List the offline bans in the specified format.",
-            "- `default`: Normal, *almost* human-readable format.",
-            "- `ini`: Suitable for adding to the `PCServer-UDKGame.ini` file."
-    };
+    public enum Format {
+        readable, ini
+    }
+
+    @Option(names = "-f", defaultValue = "readable", showDefaultValue = CommandLine.Help.Visibility.ALWAYS,
+            description = {"Format: 'readable' - for humans;",
+                    "'ini' - suitable for adding to the `PCServer-UDKGame.ini`."})
+    private Format format;
 
     private final BansDatabase bansDatabase;
 
@@ -35,31 +43,15 @@ public class ListBansCommand implements BotCommand {
         this.bansDatabase = bansDatabase;
     }
 
-    @Override
-    public @NotNull String name() {
-        return "list-bans";
-    }
+    private static final EnumMap<Format, BiFunction<List<OfflineBan>, Map<String, Ban>, List<String>>> toStringMap =
+            new EnumMap<>(Format.class) {{
+                put(Format.readable, ListBansCommand::defaultBans);
+                put(Format.ini, ListBansCommand::fileBans);
+            }};
 
     @Override
-    public @NotNull String[] description() {
-        return DESCRIPTION;
-    }
-
-    @Override
-    public @NotNull Flux<String> execute(String params, Message message) {
-        final BiFunction<List<OfflineBan>, Map<String, Ban>, List<String>> toString;
-        switch (params.strip().toLowerCase()) {
-            case "ini":
-                toString = ListBansCommand::fileBans;
-                break;
-            case "default":
-            case "":
-                toString = ListBansCommand::defaultBans;
-                break;
-
-            default:
-                return Flux.just("Unknown format: " + params);
-        }
+    public @NotNull Flux<String> execute(@NotNull Message message) {
+        final BiFunction<List<OfflineBan>, Map<String, Ban>, List<String>> toString = toStringMap.get(format);
 
         final Mono<List<OfflineBan>> offlineBans = bansDatabase.getOfflineBans()
                                                                .collectList();

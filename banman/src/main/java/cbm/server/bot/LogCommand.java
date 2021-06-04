@@ -6,6 +6,9 @@ import cbm.server.db.BansDatabase.BanLogEntry;
 import cbm.server.model.Ban;
 import discord4j.core.object.entity.Message;
 import org.jetbrains.annotations.NotNull;
+import picocli.CommandLine.Command;
+import picocli.CommandLine.Option;
+import picocli.CommandLine.Parameters;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
@@ -17,12 +20,20 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+@Command(name = "log", header = "Show ban log")
 public class LogCommand implements BotCommand {
 
-    private static final String[] DESCRIPTION = new String[]{
-            "[-p] *id-or-url*  - Shows player's ban history.",
-            "[-d] [*yyyy-mm-dd*] - Show bans for given date."
-    };
+    @Option(names = "-p", description = "Treat parameter as player ID.")
+    private boolean asPlayer;
+
+    @Parameters(arity = "1", description = {
+            "The search parameter. Can be:",
+            "- specific date *yyyy-mm-dd*",
+            "- relative date like *today* or *yesterday*",
+            "- or a player ID."
+    })
+    private String param;
+
     private static final int SECONDS_PER_DAY = 24 * 3600;
 
     private final BansDatabase bansDatabase;
@@ -32,45 +43,11 @@ public class LogCommand implements BotCommand {
     }
 
     @Override
-    public @NotNull String name() {
-        return "log";
-    }
+    public @NotNull Flux<String> execute(@NotNull Message message) {
+        if (asPlayer || parseDate(param) == null)
+            return banHistoryForUser(param);
 
-    @Override
-    public @NotNull String[] description() {
-        return DESCRIPTION;
-    }
-
-    @Override
-    public @NotNull Flux<String> execute(String params, Message message) {
-        final String strip = params.strip();
-        if (strip.isEmpty())
-            return banHistoryForDate(null);
-
-        final String[] split = strip.split("\\s+");
-
-        final String firstParam = split[0];
-
-        if (split.length == 1) {
-            final LocalDate date = parseDate(firstParam);
-            if (date != null)
-                return banHistoryForDate(firstParam);
-            else
-                return banHistoryForUser(firstParam);
-        }
-
-        final String secondParam = split[1];
-
-        switch (firstParam) {
-            case "-d":
-                return banHistoryForDate(secondParam);
-
-            case "-p":
-                return banHistoryForUser(secondParam);
-
-            default:
-                return banHistoryForUser(firstParam);
-        }
+        return banHistoryForDate(param);
     }
 
     private Flux<String> banHistoryForDate(String dateString) {
@@ -89,8 +66,11 @@ public class LogCommand implements BotCommand {
     }
 
     private LocalDate parseDate(String dateString) {
-        if (dateString == null)
+        if (dateString == null || dateString.isBlank() || dateString.equalsIgnoreCase("today"))
             return LocalDate.now();
+
+        if (dateString.equalsIgnoreCase("yesterday"))
+            return LocalDate.now().minusDays(1);
 
         try {
             return LocalDate.parse(dateString);

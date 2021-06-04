@@ -2,53 +2,44 @@ package cbm.server.bot;
 
 import cbm.server.BanGenerator;
 import cbm.server.Bot;
+import discord4j.core.object.entity.Message;
 import org.jetbrains.annotations.NotNull;
+import picocli.CommandLine.Command;
+import picocli.CommandLine.Parameters;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.OffsetDateTime;
 import java.time.Period;
 import java.time.temporal.ChronoUnit;
 
+@Command(name = "ban", header = "Generate a ban line")
 public class BanCommand implements BotCommand {
 
-    private static final String[] DESCRIPTION = new String[]{
-            "*id-or-url* *period* *reason* - Generate a ban line. This can be included in the `PCServer-UDKGame.ini` " +
-                    "file to add an offline ban."
-    };
+    @Parameters(index = "0", paramLabel = "<id-or-url>", description = "Steam ID or profile URL")
+    private String idOrUrl;
+
+    @Parameters(index = "1", paramLabel = "<period>", description = "Ban period. `P0D` means permanent ban.")
+    private Period period;
+
+    @Parameters(index = "2..*", arity = "1..*", description = "Ban reason")
+    private String[] reason;
 
     @Override
-    public @NotNull String name() {
-        return "ban";
-    }
+    public @NotNull Flux<String> execute(@NotNull Message message) {
+        final OffsetDateTime now = OffsetDateTime.now();
+        final long seconds = ChronoUnit.SECONDS.between(now, now.plus(period));
 
-    @Override
-    public @NotNull String[] description() {
-        return DESCRIPTION;
-    }
+        final String r = String.join(" ", reason);
 
-    @Override
-    public @NotNull Mono<String> execute(String params) {
-        try {
-            final String[] split = params.split("\\s+", 3);
-            if (split.length != 3)
-                throw new IllegalArgumentException("Bad parameters");
-
-            final Period period = Period.parse(split[1]);
-            final OffsetDateTime now = OffsetDateTime.now();
-            final long seconds = ChronoUnit.SECONDS.between(now, now.plus(period));
-            final String reason = split[2].strip();
-
-            return Bot.resolveSteamID(split[0])
-                      .flatMap(id -> Bot.getPlayerName(id)
-                                        .switchIfEmpty(Mono.just("player_" + id.steamID64()))
-                                        .flatMap(name -> Mono.just("`" + BanGenerator.banLine(id,
-                                                                                              seconds,
-                                                                                              null,
-                                                                                              name,
-                                                                                              reason) + "`")));
-
-        } catch (RuntimeException e) {
-            return Mono.error(e);
-        }
+        return Bot.resolveSteamID(idOrUrl)
+                  .flatMap(id -> Bot.getPlayerName(id)
+                                    .switchIfEmpty(Mono.just("player_" + id.steamID64()))
+                                    .flatMap(name -> Mono.just("`" + BanGenerator.banLine(id,
+                                                                                          seconds,
+                                                                                          null,
+                                                                                          name,
+                                                                                          r) + "`")))
+                  .flux();
     }
 }

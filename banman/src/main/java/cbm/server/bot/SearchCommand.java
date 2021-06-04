@@ -9,6 +9,8 @@ import discord4j.core.object.MessageReference;
 import discord4j.core.object.entity.Message;
 import discord4j.core.object.entity.channel.MessageChannel;
 import org.jetbrains.annotations.NotNull;
+import picocli.CommandLine.Command;
+import picocli.CommandLine.Parameters;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -16,10 +18,11 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+@Command(name = "search", header = "Search the bans database")
 public class SearchCommand implements BotCommand {
-    private static final String[] DESCRIPTION = new String[]{
-            "*query* - Search bans."
-    };
+
+    @Parameters(arity = "1..*")
+    private String[] query;
 
     private final BansDatabase bansDatabase;
 
@@ -28,17 +31,8 @@ public class SearchCommand implements BotCommand {
     }
 
     @Override
-    public @NotNull String name() {
-        return "search";
-    }
-
-    @Override
-    public @NotNull String[] description() {
-        return DESCRIPTION;
-    }
-
-    @Override
-    public @NotNull Flux<String> execute(String params, Message message) {
+    public @NotNull Flux<String> execute(@NotNull Message message) {
+        final String params = String.join(" ", query);
         return message.getMessageReference()
                       .flatMap(MessageReference::getMessageId)
                       .map(id -> nextPage(params, message.getChannel(), id))

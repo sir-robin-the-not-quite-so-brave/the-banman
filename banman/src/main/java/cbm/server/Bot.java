@@ -2,29 +2,21 @@ package cbm.server;
 
 import cbm.server.bot.AddBanCommand;
 import cbm.server.bot.BanCommand;
-import cbm.server.bot.BotCommand;
-import cbm.server.bot.HelpCommand;
 import cbm.server.bot.ListBansCommand;
 import cbm.server.bot.LogCommand;
-import cbm.server.bot.MessageComposer;
 import cbm.server.bot.PingCommand;
 import cbm.server.bot.ProfileCommand;
 import cbm.server.bot.RemoveBanCommand;
 import cbm.server.bot.SearchCommand;
 import cbm.server.db.BansDatabase;
 import cbm.server.model.Ban;
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
 import discord4j.common.util.Snowflake;
 import discord4j.core.DiscordClientBuilder;
 import discord4j.core.GatewayDiscordClient;
 import discord4j.core.event.domain.lifecycle.ReadyEvent;
 import discord4j.core.event.domain.message.MessageCreateEvent;
-import discord4j.core.object.entity.Member;
-import discord4j.core.object.entity.Message;
 import discord4j.core.object.entity.User;
 import discord4j.core.object.entity.channel.MessageChannel;
-import discord4j.core.object.entity.channel.PrivateChannel;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
@@ -34,30 +26,24 @@ import picocli.CommandLine.Option;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.function.Tuple2;
-import reactor.util.function.Tuple3;
 import reactor.util.function.Tuples;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -65,7 +51,6 @@ import java.util.stream.Stream;
 public class Bot implements Callable<Integer> {
 
     private static final Logger LOGGER = LogManager.getLogger();
-    private static final Logger COMMAND_LOGGER = LogManager.getLogger("command");
 
     @Option(names = {"-t", "--token"}, required = true)
     private String discordToken;
@@ -93,12 +78,6 @@ public class Bot implements Callable<Integer> {
 
     @Option(names = {"--prefix"}, defaultValue = "!bm")
     private String prefix;
-
-    private final Cache<Snowflake, Boolean> cache =
-            Caffeine.newBuilder()
-                    .maximumSize(10_000)
-                    .expireAfterWrite(1, TimeUnit.MINUTES)
-                    .build();
 
     public static void main(String[] args) {
         final CommandLine commandLine = new CommandLine(new Bot());
@@ -138,17 +117,17 @@ public class Bot implements Callable<Integer> {
                 }
             }, 1, 1, TimeUnit.DAYS);
 
-
-            final Map<String, BotCommand> botCommands =
-                    commandsMap(new PingCommand(),
-                                new ProfileCommand(),
-                                new BanCommand(),
-                                new LogCommand(bansDatabase),
-                                new SearchCommand(bansDatabase),
-                                new AddBanCommand(bansDatabase),
-                                new RemoveBanCommand(bansDatabase),
-                                new ListBansCommand(bansDatabase));
-            final BotCommand helpCommand = botCommands.get("help");
+            final var handler =
+                    new MessageHandler(prefix, channelIds, roles,
+                                       () -> new CommandLine(new Cmd())
+                                                     .addSubcommand(new PingCommand())
+                                                     .addSubcommand(new ProfileCommand())
+                                                     .addSubcommand(new BanCommand())
+                                                     .addSubcommand(new LogCommand(bansDatabase))
+                                                     .addSubcommand(new SearchCommand(bansDatabase))
+                                                     .addSubcommand(new AddBanCommand(bansDatabase))
+                                                     .addSubcommand(new RemoveBanCommand(bansDatabase))
+                                                     .addSubcommand(new ListBansCommand(bansDatabase)));
 
             final GatewayDiscordClient client = DiscordClientBuilder.create(discordToken)
                                                                     .build()
@@ -171,12 +150,9 @@ public class Bot implements Callable<Integer> {
 
             client.getEventDispatcher().on(MessageCreateEvent.class)
                   .map(MessageCreateEvent::getMessage)
-                  .flatMap(message -> parse(message, channelIds, roles))
-                  .flatMap(parsed -> botCommands.getOrDefault(parsed.getT2(), helpCommand)
-                                                .execute(parsed.getT3(), parsed.getT1())
-                                                .onErrorResume(t -> Mono.justOrEmpty(t.getMessage()))
-                                                .flatMap(reply -> replyTo(parsed.getT1(), reply)))
+                  .flatMap(handler::handle)
                   .subscribe();
+
             client.onDisconnect().block();
             return 0;
         }
@@ -280,107 +256,6 @@ public class Bot implements Callable<Integer> {
         };
     }
 
-    @NotNull
-    private Mono<Message> replyTo(Message message, String response) {
-        final String rs;
-        if (response.getBytes(StandardCharsets.UTF_8).length > MessageComposer.MAX_MESSAGE_LENGTH) {
-            LOGGER.error("Response message too long!", new RuntimeException());
-            rs = response.substring(0, MessageComposer.MAX_MESSAGE_LENGTH - 3) + "...";
-        } else {
-            rs = response;
-        }
-
-        return message.getChannel()
-                      .flatMap(channel -> channel.createMessage(spec -> spec.setContent(rs)
-                                                                            .setMessageReference(message.getId())));
-    }
-
-    private static Map<String, BotCommand> commandsMap(BotCommand... commands) {
-        return Stream.concat(Stream.of(commands),
-                             Stream.of(new HelpCommand(commands)))
-                     .collect(Collectors.toMap(command -> command.name().toLowerCase(), Function.identity()));
-    }
-
-    private Mono<Tuple3<Message, String, String>> parse(Message message, Set<Snowflake> channelIds,
-                                                        Map<Snowflake, Set<Snowflake>> guildRoles) {
-
-        return requirePrefix(message, channelIds, guildRoles)
-                       .flatMap(requirePrefix -> {
-                           final String[] parts = message.getContent().split("\\s+");
-                           if (parts.length == 0)
-                               return Mono.empty();
-
-                           final boolean hasPrefix = parts[0].equalsIgnoreCase(prefix);
-
-                           if (requirePrefix && !hasPrefix)
-                               return Mono.empty();
-
-                           final int cmdIdx = hasPrefix ? 1 : 0;
-                           final int minLength = hasPrefix ? 2 : 1;
-
-                           COMMAND_LOGGER.info("{}", message.getContent());
-
-                           final String command = Optional.of(parts)
-                                                          .filter(p -> p.length >= minLength)
-                                                          .map(p -> p[cmdIdx])
-                                                          .map(String::toLowerCase)
-                                                          .orElse("help");
-
-                           final StringBuilder sb = new StringBuilder();
-                           for (int i = cmdIdx + 1; i < parts.length; i++)
-                               sb.append(" ").append(parts[i]);
-                           final String params = sb.toString().strip();
-
-                           return Mono.just(Tuples.of(message, command, params));
-                       });
-    }
-
-    /**
-     * @return Empty {@link Mono} if the message should be ignored, {@link Mono} containing {@code True} if the message
-     * should start with {@link #prefix}, or {@code False} if it doesn't have to.
-     */
-    private Mono<Boolean> requirePrefix(Message message, Set<Snowflake> channelIds,
-                                        Map<Snowflake, Set<Snowflake>> guildRoles) {
-
-        final Optional<User> optAuthor = message.getAuthor();
-        if (optAuthor.isEmpty())
-            return Mono.empty();
-
-        final User author = optAuthor.get();
-        if (author.isBot())
-            return Mono.empty();
-
-        if (channelIds.contains(message.getChannelId()))
-            return Mono.just(true);
-
-        return message.getChannel()
-                      .filter(ch -> ch instanceof PrivateChannel)
-                      .flatMap(ch -> Mono.zip(guildRoles.entrySet()
-                                                        .stream()
-                                                        .map(e -> isMemberWithRole(author, e.getKey(), e.getValue())
-                                                                          .onErrorReturn(false))
-                                                        .collect(Collectors.toList()),
-                                              objects -> Arrays.asList(objects).contains(Boolean.TRUE) ? false : null)
-                                         .switchIfEmpty(((Supplier<Mono<Boolean>>) () -> {
-                                             if (cache.getIfPresent(ch.getId()) != null)
-                                                 return Mono.empty();
-
-                                             return ch.createMessage("You're not an admin. Shoo!")
-                                                      .flatMap(msg -> {
-                                                          cache.put(ch.getId(), false);
-                                                          LOGGER.info("I told {} ({}) to piss off",
-                                                                      author.getUsername(), author.getId());
-                                                          return Mono.empty();
-                                                      });
-                                         }).get()));
-    }
-
-    private Mono<Boolean> isMemberWithRole(User user, Snowflake guildId, Set<Snowflake> allowedRoles) {
-        return user.asMember(guildId)
-                   .map(Member::getRoleIds)
-                   .map(roles -> !intersection(roles, allowedRoles).isEmpty());
-    }
-
     public static Mono<SteamID> resolveSteamID(String id) {
         return SteamID.steamID(id)
                       .map(Mono::just)
@@ -393,14 +268,18 @@ public class Bot implements Callable<Integer> {
                        .map(TextUtils::printable);
     }
 
-    private static <T> @NotNull Set<T> union(@NotNull Set<T> s1, @NotNull Set<T> s2) {
+    public static <T> @NotNull Set<T> union(@NotNull Set<T> s1, @NotNull Set<T> s2) {
         return Stream.concat(s1.stream(), s2.stream())
                      .collect(Collectors.toSet());
     }
 
-    private static <T> @NotNull Set<T> intersection(@NotNull Set<T> s1, @NotNull Set<T> s2) {
+    public static <T> @NotNull Set<T> intersection(@NotNull Set<T> s1, @NotNull Set<T> s2) {
         return s1.stream()
                  .filter(s2::contains)
                  .collect(Collectors.toSet());
+    }
+
+    @Command(header = "Chivalry Ban Manager.")
+    private static class Cmd {
     }
 }
