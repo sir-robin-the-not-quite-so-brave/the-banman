@@ -14,8 +14,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import picocli.CommandLine;
-import picocli.CommandLine.Help;
-import picocli.CommandLine.IHelpCommandInitializable2;
 import picocli.CommandLine.ParameterException;
 import picocli.CommandLine.ParseResult;
 import reactor.core.publisher.Flux;
@@ -36,7 +34,12 @@ public class MessageHandler {
     private static final Logger LOGGER = LogManager.getLogger();
     private static final Logger COMMAND_LOGGER = LogManager.getLogger("command");
 
-    private static final Cache<Snowflake, Boolean> CACHE =
+    /**
+     * This cache stores recently replied to, unauthorized channels. We put the channel
+     * in the cache when we reply to it, and do not reply again as long as the channel
+     * is still in the cache.
+     */
+    private static final Cache<Snowflake, Boolean> UNAUTHORIZED_CHANNELS =
             Caffeine.newBuilder()
                     .maximumSize(10_000)
                     .expireAfterWrite(1, TimeUnit.MINUTES)
@@ -56,6 +59,27 @@ public class MessageHandler {
         this.channelIds = channelIds;
         this.guildRoles = guildRoles;
         this.commandLineSupplier = commandLineSupplier;
+    }
+
+    @NotNull
+    private static Mono<Message> replyTo(Message message, String response) {
+        final String rs;
+        if (response.getBytes(StandardCharsets.UTF_8).length > MessageComposer.MAX_MESSAGE_LENGTH) {
+            LOGGER.error("Response message too long!", new RuntimeException());
+            rs = response.substring(0, MessageComposer.MAX_MESSAGE_LENGTH - 3) + "...";
+        } else {
+            rs = response;
+        }
+
+        return message.getChannel()
+                      .flatMap(channel -> channel.createMessage(spec -> spec.setContent(rs)
+                                                                            .setMessageReference(message.getId())));
+    }
+
+    private static Mono<Boolean> isMemberWithRole(User user, Snowflake guildId, Set<Snowflake> allowedRoles) {
+        return user.asMember(guildId)
+                   .map(Member::getRoleIds)
+                   .map(roles -> !intersection(roles, allowedRoles).isEmpty());
     }
 
     public Flux<Message> handle(@NotNull Message message) {
@@ -78,10 +102,8 @@ public class MessageHandler {
                         final ParseResult parsed = commandLine.parseArgs(withoutPrefix);
                         final BotCommand command = getBotCommand(parsed)
                                                             .orElse(helpCommand);
-                        if (command instanceof IHelpCommandInitializable2)
-                            ((IHelpCommandInitializable2) command).init(parsed.commandSpec().commandLine(),
-                                                                        Help.defaultColorScheme(Help.Ansi.OFF),
-                                                                        null, null);
+                        if (command instanceof HelpCommand)
+                            ((HelpCommand) command).init(parsed.commandSpec().commandLine());
 
                         return command.execute(message)
                                       .onErrorResume(t -> Mono.justOrEmpty(t.getMessage()))
@@ -90,21 +112,6 @@ public class MessageHandler {
                         return replyTo(message, e.getMessage());
                     }
                 });
-    }
-
-    @NotNull
-    private static Mono<Message> replyTo(Message message, String response) {
-        final String rs;
-        if (response.getBytes(StandardCharsets.UTF_8).length > MessageComposer.MAX_MESSAGE_LENGTH) {
-            LOGGER.error("Response message too long!", new RuntimeException());
-            rs = response.substring(0, MessageComposer.MAX_MESSAGE_LENGTH - 3) + "...";
-        } else {
-            rs = response;
-        }
-
-        return message.getChannel()
-                      .flatMap(channel -> channel.createMessage(spec -> spec.setContent(rs)
-                                                                            .setMessageReference(message.getId())));
     }
 
     private Optional<BotCommand> getBotCommand(ParseResult parsed) {
@@ -149,22 +156,16 @@ public class MessageHandler {
                                                         .collect(Collectors.toList()),
                                               objects -> Arrays.asList(objects).contains(Boolean.TRUE) ? false : null)
                                          .switchIfEmpty(((Supplier<Mono<Boolean>>) () -> {
-                                             if (CACHE.getIfPresent(ch.getId()) != null)
+                                             if (UNAUTHORIZED_CHANNELS.getIfPresent(ch.getId()) != null)
                                                  return Mono.empty();
 
                                              return ch.createMessage("You're not an admin. Shoo!")
                                                       .flatMap(msg -> {
-                                                          CACHE.put(ch.getId(), false);
+                                                          UNAUTHORIZED_CHANNELS.put(ch.getId(), false);
                                                           LOGGER.info("I told {} ({}) to piss off",
                                                                       author.getUsername(), author.getId());
                                                           return Mono.empty();
                                                       });
                                          }).get()));
-    }
-
-    private static Mono<Boolean> isMemberWithRole(User user, Snowflake guildId, Set<Snowflake> allowedRoles) {
-        return user.asMember(guildId)
-                   .map(Member::getRoleIds)
-                   .map(roles -> !intersection(roles, allowedRoles).isEmpty());
     }
 }

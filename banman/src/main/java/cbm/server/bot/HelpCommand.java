@@ -5,13 +5,10 @@ import org.jetbrains.annotations.NotNull;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help;
-import picocli.CommandLine.IHelpCommandInitializable2;
 import picocli.CommandLine.ParameterException;
 import picocli.CommandLine.Parameters;
 import reactor.core.publisher.Flux;
 
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import java.util.Map;
 import java.util.Objects;
 
@@ -19,19 +16,22 @@ import java.util.Objects;
         synopsisHeading = "%nUsage: ", helpCommand = true,
         description = {"%nWhen no COMMAND is given, the usage help for the main command is displayed.",
                 "If a COMMAND is specified, the help for that command is shown.%n"})
-public class HelpCommand implements BotCommand, IHelpCommandInitializable2 {
+public class HelpCommand implements BotCommand {
 
+    private static final MessageComposer COMPOSER = new MessageComposer.Builder()
+                                                            .setHeader("```")
+                                                            .setFooter("```")
+                                                            .build();
+
+    @SuppressWarnings("FieldMayBeFinal")
     @Parameters(paramLabel = "COMMAND", descriptionKey = "helpCommand.command",
             description = "The COMMAND to display the usage help message for.")
     private String[] commands = new String[0];
 
     private CommandLine parent;
-    private Help.ColorScheme colorScheme;
 
-    @Override
-    public void init(CommandLine helpCommandLine, Help.ColorScheme colorScheme, PrintWriter out, PrintWriter err) {
+    public void init(CommandLine helpCommandLine) {
         this.parent = Objects.requireNonNull(helpCommandLine, "helpCommandLine");
-        this.colorScheme = Objects.requireNonNull(colorScheme, "colorScheme");
     }
 
     @Override
@@ -53,11 +53,8 @@ public class HelpCommand implements BotCommand, IHelpCommandInitializable2 {
     }
 
     private Flux<String> usage(CommandLine command) {
-        final StringWriter sw = new StringWriter();
-        try (final PrintWriter out = new PrintWriter(sw)) {
-            command.usage(out, colorScheme);
-        }
-        final String help = sw.toString();
-        return Flux.just(help);
+        final String usageMessage = command.getUsageMessage(Help.Ansi.OFF);
+        final String[] lines = usageMessage.split("\n");
+        return Flux.fromIterable(COMPOSER.compose(lines));
     }
 }
