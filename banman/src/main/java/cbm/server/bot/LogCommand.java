@@ -20,17 +20,23 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-@Command(name = "log", header = "Show ban log")
+@Command(name = "log", header = "Show ban log", synopsisHeading = "%nUsage: ",
+        description = {"%nShow the ban history either for a player or for a date.%n"})
 public class LogCommand implements BotCommand {
 
-    @Option(names = "-p", description = "Treat parameter as player ID.")
+    @Option(names = "-p", description = "Force the parameter to be treated as player ID")
     private boolean asPlayer;
 
     @Parameters(arity = "1", description = {
             "The search parameter. Can be:",
-            "- specific date *yyyy-mm-dd*",
-            "- relative date like *today* or *yesterday*",
-            "- or a player ID."
+            "- yyyy-mm-dd - specific date",
+            "- 'today' or 'yesterday' - convenience relative dates",
+            "- steamID (STEAM_0:0:61887661)",
+            "- steamID3 ([U:1:123775322])",
+            "- steamID64 (76561198084041050)",
+            "- full profile URL (https://steamcommunity.com/profiles/76561198084041050/)",
+            "- custom URL (robin-the-not-quite-so-brave)",
+            "- full custom URL (https://steamcommunity.com/id/robin-the-not-quite-so-brave)"
     })
     private String param;
 

@@ -25,7 +25,11 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-@Command(name = "list-bans", header = "Show the offline bans")
+@Command(name = "list-bans", header = "Show the offline bans", synopsisHeading = "%nUsage: ",
+        description = {"%nShow the offline bans. There are two supported formats:",
+                "- readable - which is designed for humans, and",
+                "- ini - which is designed to be copy/pasted in the PCServer-UDKGame.ini file.",
+                "%nThe 'ini' output also contains instructions if the offline bans replace existing bans.%n"})
 public class ListBansCommand implements BotCommand {
 
     public enum Format {
@@ -33,8 +37,8 @@ public class ListBansCommand implements BotCommand {
     }
 
     @Option(names = "-f", defaultValue = "readable", showDefaultValue = CommandLine.Help.Visibility.ALWAYS,
-            description = {"Format: 'readable' - for humans;",
-                    "'ini' - suitable for adding to the `PCServer-UDKGame.ini`."})
+            description = {"- readable - for humans (sort of)",
+                    "- ini - for applying the bans"})
     private Format format;
 
     private final BansDatabase bansDatabase;

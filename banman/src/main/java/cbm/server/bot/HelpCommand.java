@@ -14,7 +14,7 @@ import java.util.Objects;
 
 @Command(name = "help", header = "Displays help information about the specified command",
         synopsisHeading = "%nUsage: ", helpCommand = true,
-        description = {"%nWhen no COMMAND is given, the usage help for the main command is displayed.",
+        description = {"%nWhen no COMMAND is given, the usage help for the bot is displayed.",
                 "If a COMMAND is specified, the help for that command is shown.%n"})
 public class HelpCommand implements BotCommand {
 

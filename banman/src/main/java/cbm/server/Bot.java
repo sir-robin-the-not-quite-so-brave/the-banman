@@ -1,7 +1,6 @@
 package cbm.server;
 
 import cbm.server.bot.AddBanCommand;
-import cbm.server.bot.BanCommand;
 import cbm.server.bot.ListBansCommand;
 import cbm.server.bot.LogCommand;
 import cbm.server.bot.PingCommand;
@@ -122,7 +121,6 @@ public class Bot implements Callable<Integer> {
                                        () -> new CommandLine(new Cmd())
                                                      .addSubcommand(new PingCommand())
                                                      .addSubcommand(new ProfileCommand())
-                                                     .addSubcommand(new BanCommand())
                                                      .addSubcommand(new LogCommand(bansDatabase))
                                                      .addSubcommand(new SearchCommand(bansDatabase))
                                                      .addSubcommand(new AddBanCommand(bansDatabase))
