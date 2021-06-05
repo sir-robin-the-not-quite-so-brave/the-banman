@@ -6,6 +6,7 @@ import cbm.server.db.BansDatabase.BanLogEntry;
 import cbm.server.model.Ban;
 import discord4j.core.object.entity.Message;
 import org.jetbrains.annotations.NotNull;
+import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -16,28 +17,37 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 @Command(name = "log", header = "Show ban log", synopsisHeading = "%nUsage: ",
-        description = {"%nShow the ban history either for a player or for a date.%n"})
+        description = {"%nShow the ban history either for a player or for a date. By default," +
+                               " hide bans shorter than 5 minutes. To show them too add the -a option.%n"})
 public class LogCommand implements BotCommand {
+
+    private static final Duration MIN_BAN_DURATION = Duration.of(5, ChronoUnit.MINUTES);
 
     @Option(names = "-p", description = "Force the parameter to be treated as player ID")
     private boolean asPlayer;
 
-    @Parameters(arity = "1", description = {
-            "The search parameter. Can be:",
-            "- yyyy-mm-dd - specific date",
-            "- 'today' or 'yesterday' - convenience relative dates",
-            "- steamID (STEAM_0:0:61887661)",
-            "- steamID3 ([U:1:123775322])",
-            "- steamID64 (76561198084041050)",
-            "- full profile URL (https://steamcommunity.com/profiles/76561198084041050/)",
-            "- custom URL (robin-the-not-quite-so-brave)",
-            "- full custom URL (https://steamcommunity.com/id/robin-the-not-quite-so-brave)"
-    })
+    @Option(names = "-a", description = "Show all bans")
+    private boolean showAllBans;
+
+    @Parameters(arity = "1", defaultValue = "today", showDefaultValue = CommandLine.Help.Visibility.ALWAYS,
+            description = {
+                    "The search parameter. Can be:",
+                    "- yyyy-mm-dd - specific date",
+                    "- 'today' or 'yesterday' - convenience relative dates",
+                    "- steamID (STEAM_0:0:61887661)",
+                    "- steamID3 ([U:1:123775322])",
+                    "- steamID64 (76561198084041050)",
+                    "- full profile URL (https://steamcommunity.com/profiles/76561198084041050/)",
+                    "- custom URL (robin-the-not-quite-so-brave)",
+                    "- full custom URL (https://steamcommunity.com/id/robin-the-not-quite-so-brave)"
+            })
     private String param;
 
     private static final int SECONDS_PER_DAY = 24 * 3600;
@@ -66,6 +76,7 @@ public class LogCommand implements BotCommand {
         final Instant to = startOfDay.plusDays(1).toInstant();
 
         return bansDatabase.getBanHistory(from, to)
+                           .filter(getBanFilter())
                            .collectList()
                            .map(entries -> toString("**Ban history for " + date + "**", entries))
                            .flatMapMany(Flux::fromIterable);
@@ -89,11 +100,21 @@ public class LogCommand implements BotCommand {
     private Flux<String> banHistoryForUser(String id) {
         return Bot.resolveSteamID(id)
                   .flatMapMany(steamID -> bansDatabase.getBanHistory(steamID)
+                                                      .filter(getBanFilter())
                                                       .collectList()
                                                       .map(entries -> toString("**Ban history** "
                                                                                        + steamID.profileUrl() + ":",
                                                                                entries))
                                                       .flatMapMany(Flux::fromIterable));
+    }
+
+    private Predicate<BanLogEntry> getBanFilter() {
+        return banLogEntry -> {
+            if (showAllBans)
+                return true;
+
+            return banLogEntry.getBan().getDuration().compareTo(MIN_BAN_DURATION) >= 0;
+        };
     }
 
     private static List<String> toString(String header, List<BanLogEntry> banHistory) {

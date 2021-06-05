@@ -277,7 +277,7 @@ public class Bot implements Callable<Integer> {
                  .collect(Collectors.toSet());
     }
 
-    @Command(header = "Chivalry Ban Manager.")
+    @Command(header = "Chivalry Ban Manager%n")
     private static class Cmd {
     }
 }
