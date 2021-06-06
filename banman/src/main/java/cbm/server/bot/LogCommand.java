@@ -118,7 +118,7 @@ public class LogCommand implements BotCommand {
         };
     }
 
-    private static List<String> toString(String header, List<BanLogEntry> banHistory) {
+    private List<String> toString(String header, List<BanLogEntry> banHistory) {
         final MessageComposer composer =
                 new MessageComposer.Builder()
                         .setHeader(header)
@@ -127,7 +127,10 @@ public class LogCommand implements BotCommand {
                         .build();
 
         if (banHistory.isEmpty())
-            return composer.compose("No bans found.");
+            if (showAllBans)
+                return composer.compose("No bans found.");
+            else
+                return composer.compose("No bans found. Try using the -a option to search for all bans.");
 
         final List<String> history =
                 banHistory.stream()
