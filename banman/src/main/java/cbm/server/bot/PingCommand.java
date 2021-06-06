@@ -1,26 +1,16 @@
 package cbm.server.bot;
 
+import discord4j.core.object.entity.Message;
 import org.jetbrains.annotations.NotNull;
-import reactor.core.publisher.Mono;
+import picocli.CommandLine.Command;
+import reactor.core.publisher.Flux;
 
+@Command(name = "ping", header = "Ping the bot", synopsisHeading = "%nUsage: ",
+        description = {"%nUseful to check if the bot is alive.%n"})
 public class PingCommand implements BotCommand {
 
-    private static final String[] DESCRIPTION = new String[]{
-            "Ping."
-    };
-
     @Override
-    public @NotNull String name() {
-        return "ping";
-    }
-
-    @Override
-    public @NotNull String[] description() {
-        return DESCRIPTION;
-    }
-
-    @Override
-    public @NotNull Mono<String> execute(String params) {
-        return Mono.just("Pong!");
+    public @NotNull Flux<String> execute(@NotNull Message message) {
+        return Flux.just("Pong!");
     }
 }

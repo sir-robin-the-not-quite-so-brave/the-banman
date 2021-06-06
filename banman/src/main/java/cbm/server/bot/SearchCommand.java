@@ -9,6 +9,9 @@ import discord4j.core.object.MessageReference;
 import discord4j.core.object.entity.Message;
 import discord4j.core.object.entity.channel.MessageChannel;
 import org.jetbrains.annotations.NotNull;
+import picocli.CommandLine.Command;
+import picocli.CommandLine.Option;
+import picocli.CommandLine.Parameters;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -16,10 +19,21 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+@Command(name = "search", header = "Search the bans database", synopsisHeading = "%nUsage: ",
+        description = {"%nFull-text search the bans database.",
+                "To get more results you can reply to the latest response with the command 'search'.%n"})
 public class SearchCommand implements BotCommand {
-    private static final String[] DESCRIPTION = new String[]{
-            "*query* - Search bans."
-    };
+
+    @Option(names = "-t", description = "Show a query tutorial")
+    private boolean showTutorial;
+
+    @Parameters(arity = "0..*",
+            description = {"Some examples:",
+                    "'cookie' - search for the word \"cookie\" in the player names or in the ban reasons",
+                    "'name:cookie' - search for the word \"cookie\" only in the player names",
+                    "'reason:cookie' - search for the word \"cookie\" only in the reasons",
+                    "'rob*' - search for words starting with \"rob\""})
+    private String[] query;
 
     private final BansDatabase bansDatabase;
 
@@ -28,17 +42,11 @@ public class SearchCommand implements BotCommand {
     }
 
     @Override
-    public @NotNull String name() {
-        return "search";
-    }
+    public @NotNull Flux<String> execute(@NotNull Message message) {
+        if (showTutorial)
+            return Flux.just("Search syntax tutorial: https://www.lucenetutorial.com/lucene-query-syntax.html");
 
-    @Override
-    public @NotNull String[] description() {
-        return DESCRIPTION;
-    }
-
-    @Override
-    public @NotNull Flux<String> execute(String params, Message message) {
+        final String params = query != null ? String.join(" ", query) : "";
         return message.getMessageReference()
                       .flatMap(MessageReference::getMessageId)
                       .map(id -> nextPage(params, message.getChannel(), id))

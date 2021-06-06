@@ -2,82 +2,59 @@ package cbm.server.bot;
 
 import discord4j.core.object.entity.Message;
 import org.jetbrains.annotations.NotNull;
+import picocli.CommandLine;
+import picocli.CommandLine.Command;
+import picocli.CommandLine.Help;
+import picocli.CommandLine.ParameterException;
+import picocli.CommandLine.Parameters;
 import reactor.core.publisher.Flux;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
-import static java.util.stream.Collectors.toMap;
-
+@Command(name = "help", header = "Displays help information about the specified command",
+        synopsisHeading = "%nUsage: ", helpCommand = true,
+        description = {"%nWhen no COMMAND is given, the usage help for the bot is displayed.",
+                "If a COMMAND is specified, the help for that command is shown.%n"})
 public class HelpCommand implements BotCommand {
 
-    private static final String[] DESCRIPTION = new String[]{
-            "[*command*] - Without parameter shows all commands.",
-            "              With parameter shows the help message for this command."
-    };
+    private static final MessageComposer COMPOSER = new MessageComposer.Builder()
+                                                            .setHeader("```")
+                                                            .setFooter("```")
+                                                            .build();
 
-    private static final String[] FOOTER = new String[]{
-            "----",
-            "**Parameters**:",
-            "- *[]*        - Parameters in brackets are optional.",
-            "- *id-or-url* - This could be steamID (`STEAM_0:0:61887661`), steamID3 (`[U:1:123775322]`), " +
-                    "steamID64 (`76561198084041050`), full profile URL or custom URL (`robin-the-not-quite-so-brave` " +
-                    "or `https://steamcommunity.com/id/robin-the-not-quite-so-brave`).",
-            "- *period*    - Ban period. Can be `P0D` - for permanent ban, `P7D` (or `P1W`) for 7 day, " +
-                    "`P2M` for 2 months, `P1Y` for 1 year. Or even `P1Y2M3W4D`.",
-            "- *yyyy-mm-dd* - Date. 2021-03-05 means 5th of March, 2021."
-    };
+    @SuppressWarnings("FieldMayBeFinal")
+    @Parameters(paramLabel = "COMMAND", descriptionKey = "helpCommand.command",
+            description = "The COMMAND to display the usage help message for.")
+    private String[] commands = new String[0];
 
-    private final Map<String, String> usage;
+    private CommandLine parent;
 
-    public HelpCommand(BotCommand... commands) {
-        this.usage =
-                Stream.concat(Stream.of(commands), Stream.of(this))
-                      .collect(toMap(command -> command.name().toLowerCase(),
-                                     this::helpMessage,
-                                     (s, s2) -> {
-                                         if (Objects.equals(s, s2))
-                                             return s;
-
-                                         final String msg = String.format("Duplicate key for values %s and %s", s, s2);
-                                         throw new IllegalStateException(msg);
-                                     },
-                                     LinkedHashMap::new));
-    }
-
-    private @NotNull String helpMessage(BotCommand command) {
-        final StringBuilder sb = new StringBuilder();
-        sb.append("**").append(command.name()).append("**:");
-        for (var d : command.description())
-            sb.append("\n    ").append(d);
-        return sb.toString();
+    public void init(CommandLine helpCommandLine) {
+        this.parent = Objects.requireNonNull(helpCommandLine, "helpCommandLine");
     }
 
     @Override
-    public @NotNull String name() {
-        return "help";
+    public @NotNull Flux<String> execute(@NotNull Message message) {
+        if (commands.length > 0) {
+            final Map<String, CommandLine> parentSubcommands = parent.getCommandSpec().subcommands();
+            final String fullName = commands[0];
+            final CommandLine subcommand = parentSubcommands.get(fullName);
+            if (subcommand == null)
+                throw new ParameterException(parent,
+                                             "Unknown subcommand '" + fullName + "'.",
+                                             null,
+                                             fullName);
+
+            return usage(subcommand);
+        } else {
+            return usage(parent);
+        }
     }
 
-    @Override
-    public @NotNull String[] description() {
-        return DESCRIPTION;
-    }
-
-    @Override
-    public @NotNull Flux<String> execute(String params, Message message) {
-        final String cmd = params.trim().toLowerCase();
-        final String u = usage.get(cmd);
-        final Stream<String> commands;
-        if (u != null)
-            commands = Stream.of(u);
-        else
-            commands = usage.values().stream();
-
-        final MessageComposer composer = new MessageComposer.Builder().build();
-        return Flux.fromIterable(composer.compose(Stream.concat(commands, Stream.of(FOOTER))
-                                                        .collect(Collectors.toList())));
+    private Flux<String> usage(CommandLine command) {
+        final String usageMessage = command.getUsageMessage(Help.Ansi.OFF);
+        final String[] lines = usageMessage.split("\n");
+        return Flux.fromIterable(COMPOSER.compose(lines));
     }
 }
