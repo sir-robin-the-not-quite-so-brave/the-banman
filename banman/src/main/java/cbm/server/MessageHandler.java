@@ -84,34 +84,37 @@ public class MessageHandler {
 
     public Flux<Message> handle(@NotNull Message message) {
         return requiresPrefix(message)
-                .flatMapMany(requiresPrefix -> {
-                    try {
-                        final String[] args = message.getContent().split("\\s+");
-                        if (requiresPrefix && (args.length == 0 || !prefix.equalsIgnoreCase(args[0])))
-                            return Flux.empty();
+                       .flatMapMany(requiresPrefix -> {
+                           try {
+                               final String[] args = message.getContent().split("\\s+");
+                               if (requiresPrefix && (args.length == 0 || !prefix.equalsIgnoreCase(args[0])))
+                                   return Flux.empty();
 
-                        COMMAND_LOGGER.info("{}", message.getContent());
+                               COMMAND_LOGGER.info("{}", message.getContent());
 
-                        final String[] withoutPrefix = removeOptionalPrefix(args);
+                               final String[] withoutPrefix = removeOptionalPrefix(args);
 
-                        final HelpCommand helpCommand = new HelpCommand();
-                        final CommandLine commandLine =
-                                commandLineSupplier.get()
-                                                   .addSubcommand(helpCommand)
-                                                   .setCommandName(prefix);
-                        final ParseResult parsed = commandLine.parseArgs(withoutPrefix);
-                        final BotCommand command = getBotCommand(parsed)
-                                                            .orElse(helpCommand);
-                        if (command instanceof HelpCommand)
-                            ((HelpCommand) command).init(parsed.commandSpec().commandLine());
+                               final HelpCommand helpCommand = new HelpCommand();
+                               final CommandLine commandLine =
+                                       commandLineSupplier.get()
+                                                          .addSubcommand(helpCommand)
+                                                          .setCommandName(prefix);
+                               final ParseResult parsed = commandLine.parseArgs(withoutPrefix);
+                               final BotCommand command = getBotCommand(parsed)
+                                                                  .orElse(helpCommand);
+                               if (command instanceof HelpCommand)
+                                   ((HelpCommand) command).init(parsed.commandSpec().commandLine());
 
-                        return command.execute(message)
-                                      .onErrorResume(t -> Mono.justOrEmpty(t.getMessage()))
-                                      .flatMap(reply -> replyTo(message, reply));
-                    } catch (ParameterException e) {
-                        return replyTo(message, e.getMessage());
-                    }
-                });
+                               return command.execute(message)
+                                             .onErrorResume(t -> {
+                                                 LOGGER.warn("Command handler failed: " + message.getContent(), t);
+                                                 return Mono.justOrEmpty(t.getMessage());
+                                             })
+                                             .flatMap(reply -> replyTo(message, reply));
+                           } catch (ParameterException e) {
+                               return replyTo(message, e.getMessage());
+                           }
+                       });
     }
 
     private Optional<BotCommand> getBotCommand(ParseResult parsed) {
