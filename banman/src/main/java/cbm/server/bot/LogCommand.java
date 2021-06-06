@@ -109,7 +109,13 @@ public class LogCommand implements BotCommand {
     }
 
     private Predicate<BanLogEntry> getBanFilter() {
-        return banLogEntry -> showAllBans || banLogEntry.getBan().getDuration().compareTo(MIN_BAN_DURATION) >= 0;
+        return banLogEntry -> {
+            final Duration duration = banLogEntry.getBan().getDuration();
+            return showAllBans
+                           || duration == null
+                           || duration.compareTo(Duration.ZERO) <= 0
+                           || duration.compareTo(MIN_BAN_DURATION) >= 0;
+        };
     }
 
     private static List<String> toString(String header, List<BanLogEntry> banHistory) {
