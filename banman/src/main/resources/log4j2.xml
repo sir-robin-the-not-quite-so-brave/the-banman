@@ -19,6 +19,9 @@
 <!--        <Logger name="cbm.server.db.SearchIndex" level="debug" additivity="true">-->
 <!--            <AppenderRef ref="LogToConsole"/>-->
 <!--        </Logger>-->
+<!--        <Logger name="cbm.server.db.BansDatabase" level="debug" additivity="true">-->
+<!--            <AppenderRef ref="LogToConsole"/>-->
+<!--        </Logger>-->
         <Root level="info">
             <AppenderRef ref="LogToConsole"/>
             <AppenderRef ref="LogToRollingFile"/>

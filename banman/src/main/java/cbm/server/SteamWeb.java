@@ -5,13 +5,14 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Evaluator;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 import java.io.IOException;
 import java.util.Optional;
-import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static cbm.server.Utils.asyncOne;
+
+// TODO Cache the external calls
 public class SteamWeb {
 
     public static @NotNull Profile downloadProfile(@NotNull String profileUrl) throws IOException {
@@ -67,17 +68,13 @@ public class SteamWeb {
     }
 
     public static Mono<Profile> playerProfile(@NotNull String profileUrl) {
-        return Mono.defer(() -> Mono.fromCallable(() -> downloadProfile(profileUrl))
-                                    .subscribeOn(Schedulers.elastic()));
+        return asyncOne(() -> downloadProfile(profileUrl));
     }
 
     public static Mono<SteamID> resolveSteamID(@NotNull String s) {
-        final Callable<SteamID> steamIDResolver =
-                () -> resolveId(s).flatMap(SteamID::steamID)
-                                  .orElseThrow(() -> new IllegalArgumentException("Cannot resolve steam ID: " + s));
-
-        return Mono.defer(() -> Mono.fromCallable(steamIDResolver)
-                                    .subscribeOn(Schedulers.elastic()));
+        return asyncOne(() -> resolveId(s).flatMap(SteamID::steamID)
+                                          .orElseThrow(() -> new IllegalArgumentException("Cannot resolve steam ID: "
+                                                                                                  + s)));
     }
 
     @SuppressWarnings("unused")

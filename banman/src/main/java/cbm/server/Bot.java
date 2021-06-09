@@ -7,6 +7,7 @@ import cbm.server.bot.PingCommand;
 import cbm.server.bot.ProfileCommand;
 import cbm.server.bot.RemoveBanCommand;
 import cbm.server.bot.SearchCommand;
+import cbm.server.bot.WantedCommand;
 import cbm.server.db.BansDatabase;
 import cbm.server.model.Ban;
 import discord4j.common.util.Snowflake;
@@ -35,8 +36,10 @@ import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -62,6 +65,12 @@ public class Bot implements Callable<Integer> {
 
     @Option(names = {"-r", "--role"}, arity = "0..*")
     private Set<String> allowedRoles;
+
+    @Option(names = {"-w", "--watch-channel"}, arity = "0..*")
+    private Set<String> watchListChannelIds;
+
+    @Option(names = {"--reset-watchlist"})
+    private boolean resetWatchlist;
 
     @Option(names = {"--host"}, required = true)
     private String hostname;
@@ -93,7 +102,7 @@ public class Bot implements Callable<Integer> {
                         .filter(a -> a.length == 2)
                         .collect(Collectors.toMap(a -> Snowflake.of(a[0]),
                                                   a -> Set.of(Snowflake.of(a[1])),
-                                                  Bot::union));
+                                                  Utils::union));
 
         final ScheduledExecutorService executorService = Executors.newSingleThreadScheduledExecutor();
         final LogDownloader logDownloader = new LogDownloader(hostname, logPath, username, password);
@@ -102,7 +111,17 @@ public class Bot implements Callable<Integer> {
                 allowedDiscordChannels.stream()
                                       .map(Snowflake::of)
                                       .collect(Collectors.toSet());
+
+        final Set<Snowflake> watchListChannels =
+                Optional.ofNullable(watchListChannelIds)
+                        .stream()
+                        .flatMap(Collection::stream)
+                        .map(Snowflake::of)
+                        .collect(Collectors.toSet());
+
         try (final BansDatabase bansDatabase = new BansDatabase(bansDatabaseDir)) {
+            if (resetWatchlist)
+                bansDatabase.clearMentionsData();
 
             executorService.scheduleAtFixedRate(() -> updateBans(logDownloader, bansDatabase),
                                                 10, 3600, TimeUnit.SECONDS);
@@ -123,16 +142,16 @@ public class Bot implements Callable<Integer> {
                                                      .addSubcommand(new ProfileCommand())
                                                      .addSubcommand(new LogCommand(bansDatabase))
                                                      .addSubcommand(new SearchCommand(bansDatabase))
+                                                     .addSubcommand(new WantedCommand(bansDatabase))
                                                      .addSubcommand(new AddBanCommand(bansDatabase))
                                                      .addSubcommand(new RemoveBanCommand(bansDatabase))
                                                      .addSubcommand(new ListBansCommand(bansDatabase)));
 
-            final GatewayDiscordClient client = DiscordClientBuilder.create(discordToken)
-                                                                    .build()
-                                                                    .login()
-                                                                    .block();
-
-            assert client != null;
+            final GatewayDiscordClient client =
+                    Objects.requireNonNull(DiscordClientBuilder.create(discordToken)
+                                                               .build()
+                                                               .login()
+                                                               .block());
 
             final Duration delay = getDelayUntil(LocalTime.parse("06:00:00"));
             LOGGER.info("Delay to first stats: {}", delay);
@@ -151,9 +170,33 @@ public class Bot implements Callable<Integer> {
                   .flatMap(handler::handle)
                   .subscribe();
 
+            client.getEventDispatcher().on(MessageCreateEvent.class)
+                  .map(MessageCreateEvent::getMessage)
+                  .filter(message -> watchListChannels.contains(message.getChannelId()))
+                  .flatMap(message -> message.getChannel()
+                                             .flatMap(channel -> new ChannelWatcher(channel, bansDatabase)
+                                                                         .updateChannel(message.getId()))
+                                             .doOnNext(stats -> LOGGER.info("Processed mentions: {}", stats)))
+                  .subscribe();
+
+            updateMentions(bansDatabase, client, watchListChannels)
+                    .subscribe();
+
             client.onDisconnect().block();
             return 0;
         }
+    }
+
+    private Mono<Void> updateMentions(BansDatabase bansDatabase, GatewayDiscordClient client,
+                                      Set<Snowflake> channelIds) {
+
+        return Flux.fromIterable(channelIds)
+                   .flatMap(client::getChannelById)
+                   .filter(MessageChannel.class::isInstance)
+                   .cast(MessageChannel.class)
+                   .flatMap(channel -> new ChannelWatcher(channel, bansDatabase).updateChannel())
+                   .doOnNext(stats -> LOGGER.info("Processed mentions: {}", stats))
+                   .then();
     }
 
     /**
@@ -264,17 +307,6 @@ public class Bot implements Callable<Integer> {
         return SteamWeb.playerProfile(steamID.profileUrl())
                        .map(SteamWeb.Profile::getName)
                        .map(TextUtils::printable);
-    }
-
-    public static <T> @NotNull Set<T> union(@NotNull Set<T> s1, @NotNull Set<T> s2) {
-        return Stream.concat(s1.stream(), s2.stream())
-                     .collect(Collectors.toSet());
-    }
-
-    public static <T> @NotNull Set<T> intersection(@NotNull Set<T> s1, @NotNull Set<T> s2) {
-        return s1.stream()
-                 .filter(s2::contains)
-                 .collect(Collectors.toSet());
     }
 
     @Command(header = "Chivalry Ban Manager%n")

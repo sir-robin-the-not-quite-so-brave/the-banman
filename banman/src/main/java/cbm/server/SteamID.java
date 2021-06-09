@@ -7,7 +7,6 @@ import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.regex.Pattern;
 
-@SuppressWarnings("WeakerAccess")
 public final class SteamID {
     private static final long STEAM64 = 0x110000100000000L;
     private static final Pattern STEAM_ID_PATTERN = Pattern.compile("STEAM_0:([01]):(\\d+)");
@@ -69,6 +68,10 @@ public final class SteamID {
 
     public long steamID64() {
         return steamID64;
+    }
+
+    public String s64() {
+        return Long.toString(steamID64);
     }
 
     public String profileUrl() {

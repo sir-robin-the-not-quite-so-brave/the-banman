@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-import static cbm.server.Bot.intersection;
+import static cbm.server.Utils.intersection;
 
 public class MessageHandler {
     private static final Logger LOGGER = LogManager.getLogger();
@@ -108,7 +108,10 @@ public class MessageHandler {
                                return command.execute(message)
                                              .onErrorResume(t -> {
                                                  LOGGER.warn("Command handler failed: " + message.getContent(), t);
-                                                 return Mono.justOrEmpty(t.getMessage());
+                                                 return Mono.just(Optional.ofNullable(t.getMessage())
+                                                                          .filter(s -> !s.isBlank())
+                                                                          .map(s -> "```\n" + s + "\n```")
+                                                                          .orElse("*An error has occurred*"));
                                              })
                                              .flatMap(reply -> replyTo(message, reply));
                            } catch (ParameterException e) {

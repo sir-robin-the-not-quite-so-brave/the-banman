@@ -3,7 +3,9 @@ package cbm.server.db;
 import cbm.server.Bot;
 import cbm.server.SteamID;
 import cbm.server.model.Ban;
+import cbm.server.model.Mention;
 import cbm.server.model.OfflineBan;
+import discord4j.common.util.Snowflake;
 import jetbrains.exodus.backup.BackupBean;
 import jetbrains.exodus.bindings.BindingUtils;
 import jetbrains.exodus.bindings.ComparableBinding;
@@ -22,7 +24,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -43,10 +44,13 @@ import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
+import static cbm.server.Utils.asyncMany;
+import static cbm.server.Utils.asyncOne;
 import static java.util.stream.Collectors.toMap;
 import static jetbrains.exodus.core.crypto.MessageDigestUtil.MD5;
 
@@ -56,10 +60,11 @@ public class BansDatabase implements AutoCloseable {
     private static final String OFFLINE_BAN = "OfflineBan";
     private static final String LOG_ENTRY = "LogEntry";
     private static final String UNIQUE_BAN = "UniqueBan";
+    private static final String MENTIONS = "Mention";
+    private static final String CHANNELS = "Channel";
     private static final ComparableBinding INSTANT_BINDING = new ComparableBinding() {
-        @SuppressWarnings("rawtypes")
         @Override
-        public Comparable readObject(@NotNull ByteArrayInputStream stream) {
+        public Instant readObject(@NotNull ByteArrayInputStream stream) {
             final long epochSecond = BindingUtils.readLong(stream);
             return Instant.ofEpochSecond(epochSecond);
         }
@@ -72,9 +77,8 @@ public class BansDatabase implements AutoCloseable {
         }
     };
     private static final ComparableBinding DURATION_BINDING = new ComparableBinding() {
-        @SuppressWarnings("rawtypes")
         @Override
-        public Comparable readObject(@NotNull ByteArrayInputStream stream) {
+        public Duration readObject(@NotNull ByteArrayInputStream stream) {
             final long seconds = BindingUtils.readLong(stream);
             return Duration.ofSeconds(seconds);
         }
@@ -86,10 +90,24 @@ public class BansDatabase implements AutoCloseable {
             output.writeUnsignedLong(seconds ^ 0x8000000000000000L);
         }
     };
+    private static final ComparableBinding SNOWFLAKE_BINDING = new ComparableBinding() {
+        @Override
+        public Snowflake readObject(@NotNull ByteArrayInputStream stream) {
+            final String s = BindingUtils.readString(stream);
+            return Snowflake.of(s);
+        }
+
+        @Override
+        public void writeObject(@NotNull LightOutputStream output, @NotNull Comparable object) {
+            final Snowflake snowflake = (Snowflake) object;
+            output.writeString(snowflake.asString());
+        }
+    };
 
     private static final BiConsumer<PersistentEntityStore, StoreTransaction> REGISTRAR = (store, txn) -> {
         store.registerCustomPropertyType(txn, Instant.class, INSTANT_BINDING);
         store.registerCustomPropertyType(txn, Duration.class, DURATION_BINDING);
+        store.registerCustomPropertyType(txn, Snowflake.class, SNOWFLAKE_BINDING);
     };
 
     private final PersistentEntityStore entityStore;
@@ -240,12 +258,12 @@ public class BansDatabase implements AutoCloseable {
                                      .block();
 
         return new OfflineBan.Builder()
-                .setId(ban.getId())
-                .setEnactedTime(Instant.now())
-                .setDuration(Duration.ofDays(7))
-                .setPlayerName(playerName)
-                .setReason("Converted from broken NetID ban.")
-                .build();
+                       .setId(ban.getId())
+                       .setEnactedTime(Instant.now())
+                       .setDuration(Duration.ofDays(7))
+                       .setPlayerName(playerName)
+                       .setReason("Converted from broken NetID ban.")
+                       .build();
     }
 
     private int compare(Duration duration1, Duration duration2) {
@@ -275,7 +293,7 @@ public class BansDatabase implements AutoCloseable {
     public boolean removeOfflineBanSync(SteamID steamID) {
         return entityStore.computeInTransaction(txn -> {
             boolean deleted = false;
-            final EntityIterable entities = txn.find(OFFLINE_BAN, "player-id", Long.toString(steamID.steamID64()));
+            final EntityIterable entities = txn.find(OFFLINE_BAN, "player-id", steamID.s64());
             for (Entity entity : entities)
                 deleted = entity.delete() || deleted;
 
@@ -294,18 +312,15 @@ public class BansDatabase implements AutoCloseable {
     }
 
     public Mono<Boolean> addOfflineBan(OfflineBan offlineBan) {
-        return Mono.defer(() -> Mono.fromCallable(() -> addOfflineBanSync(offlineBan))
-                                    .subscribeOn(Schedulers.elastic()));
+        return asyncOne(() -> addOfflineBanSync(offlineBan));
     }
 
     public Mono<Boolean> removeOfflineBan(SteamID steamID) {
-        return Mono.defer(() -> Mono.fromCallable(() -> removeOfflineBanSync(steamID))
-                                    .subscribeOn(Schedulers.elastic()));
+        return asyncOne(() -> removeOfflineBanSync(steamID));
     }
 
     public Flux<OfflineBan> getOfflineBans() {
-        return Flux.defer(() -> Flux.fromIterable(getOfflineBansSync())
-                                    .subscribeOn(Schedulers.elastic()));
+        return asyncMany(this::getOfflineBansSync);
     }
 
     public SearchResponse<Ban> searchBansSync(SearchRequest request) throws ParseException, IOException {
@@ -325,14 +340,13 @@ public class BansDatabase implements AutoCloseable {
     }
 
     public Mono<SearchResponse<Ban>> searchBans(SearchRequest request) {
-        return Mono.defer(() -> Mono.fromCallable(() -> searchBansSync(request))
-                                    .subscribeOn(Schedulers.elastic()));
+        return asyncOne(() -> searchBansSync(request));
     }
 
     public List<BanLogEntry> getBanHistorySync(SteamID steamID) {
         return entityStore.computeInReadonlyTransaction(txn -> {
             final List<BanLogEntry> entries = new ArrayList<>();
-            final EntityIterable entities = txn.find(LOG_ENTRY, "player-id", Long.toString(steamID.steamID64()));
+            final EntityIterable entities = txn.find(LOG_ENTRY, "player-id", steamID.s64());
             for (Entity entity : entities) {
                 final BanLogEntry banLogEntry = asBanLogEntry(entity);
                 entries.add(banLogEntry);
@@ -342,8 +356,7 @@ public class BansDatabase implements AutoCloseable {
     }
 
     public Flux<BanLogEntry> getBanHistory(SteamID steamID) {
-        return Flux.defer(() -> Flux.fromIterable(getBanHistorySync(steamID))
-                                    .subscribeOn(Schedulers.elastic()));
+        return asyncMany(() -> getBanHistorySync(steamID));
     }
 
     /**
@@ -368,8 +381,7 @@ public class BansDatabase implements AutoCloseable {
      * Returns ban log entries detected between {@code from} (inclusive) and {@code to} (exclusive).
      */
     public Flux<BanLogEntry> getBanHistory(Instant from, Instant to) {
-        return Flux.defer(() -> Flux.fromIterable(getBanHistorySync(from, to))
-                                    .subscribeOn(Schedulers.elastic()));
+        return asyncMany(() -> getBanHistorySync(from, to));
     }
 
     public @Nullable Instant getLastUpdateSync() {
@@ -381,11 +393,6 @@ public class BansDatabase implements AutoCloseable {
                            .map(Instant.class::cast)
                            .orElse(null);
         });
-    }
-
-    public Mono<Instant> getLastUpdate() {
-        return Mono.defer(() -> Mono.fromCallable(this::getLastUpdateSync)
-                                    .subscribeOn(Schedulers.elastic()));
     }
 
     public List<Ban> getCurrentBansSync() {
@@ -429,8 +436,7 @@ public class BansDatabase implements AutoCloseable {
     }
 
     public Flux<Ban> getCurrentBans() {
-        return Flux.defer(() -> Flux.fromIterable(getCurrentBansSync())
-                                    .subscribeOn(Schedulers.elastic()));
+        return asyncMany(this::getCurrentBansSync);
     }
 
     public File backup() throws Exception {
@@ -478,23 +484,23 @@ public class BansDatabase implements AutoCloseable {
 
     private Ban asBan(Entity entity) {
         return new Ban.Builder()
-                .setId(getProperty(entity, "player-id"))
-                .setEnactedTime(getProperty(entity, "enacted-time"))
-                .setDuration(getProperty(entity, "duration"))
-                .setIpPolicy(getProperty(entity, "ip-policy"))
-                .setPlayerName(getProperty(entity, "player-name"))
-                .setReason(getProperty(entity, "reason"))
-                .build();
+                       .setId(getProperty(entity, "player-id"))
+                       .setEnactedTime(getProperty(entity, "enacted-time"))
+                       .setDuration(getProperty(entity, "duration"))
+                       .setIpPolicy(getProperty(entity, "ip-policy"))
+                       .setPlayerName(getProperty(entity, "player-name"))
+                       .setReason(getProperty(entity, "reason"))
+                       .build();
     }
 
     private OfflineBan asOfflineBan(Entity entity) {
         return new OfflineBan.Builder()
-                .setId(getProperty(entity, "player-id"))
-                .setEnactedTime(getProperty(entity, "enacted-time"))
-                .setDuration(getProperty(entity, "duration"))
-                .setPlayerName(getProperty(entity, "player-name"))
-                .setReason(getProperty(entity, "reason"))
-                .build();
+                       .setId(getProperty(entity, "player-id"))
+                       .setEnactedTime(getProperty(entity, "enacted-time"))
+                       .setDuration(getProperty(entity, "duration"))
+                       .setPlayerName(getProperty(entity, "player-name"))
+                       .setReason(getProperty(entity, "reason"))
+                       .build();
     }
 
     private boolean isSameBan(Ban ban, Entity entity) {
@@ -506,8 +512,8 @@ public class BansDatabase implements AutoCloseable {
         final Duration duration = getProperty(entity, "duration");
 
         return Objects.equals(id, ban.getId())
-                && Objects.equals(enactedTime, ban.getEnactedTime())
-                && Objects.equals(duration, ban.getDuration());
+                       && Objects.equals(enactedTime, ban.getEnactedTime())
+                       && Objects.equals(duration, ban.getDuration());
     }
 
     @Contract("_, !null -> param2")
@@ -527,6 +533,54 @@ public class BansDatabase implements AutoCloseable {
         setProperty(entity, "duration", ban.getDuration());
         setProperty(entity, "player-name", ban.getPlayerName());
         setProperty(entity, "reason", ban.getReason());
+    }
+
+    public boolean addMentionSync(@NotNull Mention mention) {
+        LOGGER.debug("Adding mention: {}", mention);
+        return entityStore.computeInExclusiveTransaction(txn -> {
+            final EntityIterable entities =
+                    txn.find(MENTIONS, "message-id", mention.getMessageId());
+
+            for (var entity : entities) {
+                final String playerId = getProperty(entity, "player-id");
+                if (mention.getPlayerId().s64().equals(playerId))
+                    return false;
+            }
+
+            final Entity entity = txn.newEntity(MENTIONS);
+            entity.setProperty("player-id", mention.getPlayerId().s64());
+            if (mention.getGuildId() != null)
+                entity.setProperty("guild-id", mention.getGuildId());
+            entity.setProperty("channel-id", mention.getChannelId());
+            entity.setProperty("message-id", mention.getMessageId());
+            entity.setProperty("mentioned-at", mention.getMentionedAt());
+            return true;
+        });
+    }
+
+    public Mono<Boolean> addMention(@NotNull Mention mention) {
+        return asyncOne(() -> addMentionSync(mention));
+    }
+
+    public Flux<Mention> findMentions(@NotNull SteamID steamID) {
+        return asyncMany(() -> entityStore.computeInReadonlyTransaction(txn -> {
+            final List<Mention> mentions = new ArrayList<>();
+            final EntityIterable entities = txn.find(MENTIONS, "player-id", steamID.s64());
+            for (var entity : entities) {
+                final Mention mention = asMention(steamID, entity);
+                mentions.add(mention);
+            }
+            return mentions;
+        }));
+    }
+
+    @NotNull
+    private Mention asMention(@NotNull SteamID steamID, @NotNull Entity entity) {
+        final Instant mentionedAt = Objects.requireNonNull(getProperty(entity, "mentioned-at"));
+        final Snowflake guildId = getProperty(entity, "guild-id");
+        final Snowflake channelId = Objects.requireNonNull(getProperty(entity, "channel-id"));
+        final Snowflake messageId = Objects.requireNonNull(getProperty(entity, "message-id"));
+        return new Mention(steamID, mentionedAt, guildId, channelId, messageId);
     }
 
     @Contract("_, !null -> param2")
@@ -553,6 +607,56 @@ public class BansDatabase implements AutoCloseable {
         searchIndex.close();
     }
 
+    /**
+     * Set the last message ID of the specified channel if the predicate isNewerThan returns {@code true} for the
+     * old ID.
+     *
+     * @param channelId   The channel ID
+     * @param messageId   The new message ID
+     * @param isNewerThan The predicate to test the old message ID
+     * @return Mono with the old ID if the update was done, or an empty Mono if it wasn't
+     */
+    @SuppressWarnings("OptionalAssignedToNull")
+    public Mono<Optional<Snowflake>> setLastProcessedMessageId(@NotNull Snowflake channelId,
+                                                               @NotNull Snowflake messageId,
+                                                               @NotNull Predicate<@Nullable Snowflake> isNewerThan) {
+
+        return asyncOne(() -> entityStore.computeInExclusiveTransaction(txn -> {
+            LOGGER.info("setLastProcessedMessageId({}, {})", channelId, messageId);
+            final Entity first = txn.find(CHANNELS, "channel-id", channelId).getFirst();
+            final Optional<Snowflake> oldMessageIdOpt =
+                    Optional.ofNullable(first)
+                            .map(entity -> getProperty(entity, "latest-message-id"));
+
+            final boolean isNewer = isNewerThan.test(oldMessageIdOpt.orElse(null));
+            LOGGER.info("isNewerThan {} returned {}", oldMessageIdOpt, isNewer);
+            if (!isNewer)
+                return null;
+
+            if (first != null)
+                first.delete();
+
+            final var entity = txn.newEntity(CHANNELS);
+            setProperty(entity, "channel-id", channelId);
+            setProperty(entity, "latest-message-id", messageId);
+
+            LOGGER.info("Set the last processed message for channel {} to {}", channelId, messageId);
+            return oldMessageIdOpt;
+        }));
+    }
+
+    public void clearMentionsData() {
+        entityStore.executeInExclusiveTransaction(txn -> {
+            removeAllEntities(txn, MENTIONS);
+            removeAllEntities(txn, CHANNELS);
+        });
+    }
+
+    private void removeAllEntities(StoreTransaction txn, String entityType) {
+        for (var entity : txn.getAll(entityType))
+            entity.delete();
+    }
+
     @SuppressWarnings("unused")
     public interface BanLogEntry {
         Instant getDetectedAt();
@@ -560,6 +664,12 @@ public class BansDatabase implements AutoCloseable {
         String getAction();
 
         Ban getBan();
+    }
+
+    public interface Stats {
+        int numAdded();
+
+        int numRemoved();
     }
 
     static class UniqueBan {
@@ -600,12 +710,6 @@ public class BansDatabase implements AutoCloseable {
                            .add("ban=" + ban)
                            .toString();
         }
-    }
-
-    public interface Stats {
-        int numAdded();
-
-        int numRemoved();
     }
 
     @SuppressWarnings("unused")
