@@ -50,14 +50,10 @@ public class MessageHandler {
     private final Map<Snowflake, Set<Snowflake>> guildRoles;
     private final Supplier<CommandLine> commandLineSupplier;
 
-    public MessageHandler(@NotNull String prefix,
-                          @NotNull Set<Snowflake> channelIds,
-                          @NotNull Map<Snowflake, Set<Snowflake>> guildRoles,
-                          @NotNull Supplier<CommandLine> commandLineSupplier) {
-
-        this.prefix = prefix;
-        this.channelIds = channelIds;
-        this.guildRoles = guildRoles;
+    public MessageHandler(@NotNull Configuration configuration, @NotNull Supplier<CommandLine> commandLineSupplier) {
+        this.prefix = configuration.getPrefix();
+        this.channelIds = configuration.getReplyToChannels();
+        this.guildRoles = configuration.getReplyToRoles();
         this.commandLineSupplier = commandLineSupplier;
     }
 
