@@ -36,6 +36,10 @@ public class LogDownloader {
     private final String username;
     private final String password;
 
+    public LogDownloader(@NotNull Bot.ChivalryServer server) {
+        this(server.hostname, server.logPath, server.username, server.password);
+    }
+
     public LogDownloader(@NotNull String hostname, @NotNull String logPath, @NotNull String username,
                          @NotNull String password) {
 

@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-import static cbm.server.Bot.intersection;
+import static cbm.server.Utils.intersection;
 
 public class MessageHandler {
     private static final Logger LOGGER = LogManager.getLogger();
@@ -50,14 +50,10 @@ public class MessageHandler {
     private final Map<Snowflake, Set<Snowflake>> guildRoles;
     private final Supplier<CommandLine> commandLineSupplier;
 
-    public MessageHandler(@NotNull String prefix,
-                          @NotNull Set<Snowflake> channelIds,
-                          @NotNull Map<Snowflake, Set<Snowflake>> guildRoles,
-                          @NotNull Supplier<CommandLine> commandLineSupplier) {
-
-        this.prefix = prefix;
-        this.channelIds = channelIds;
-        this.guildRoles = guildRoles;
+    public MessageHandler(@NotNull Configuration configuration, @NotNull Supplier<CommandLine> commandLineSupplier) {
+        this.prefix = configuration.getPrefix();
+        this.channelIds = configuration.getReplyToChannels();
+        this.guildRoles = configuration.getReplyToRoles();
         this.commandLineSupplier = commandLineSupplier;
     }
 
@@ -108,7 +104,10 @@ public class MessageHandler {
                                return command.execute(message)
                                              .onErrorResume(t -> {
                                                  LOGGER.warn("Command handler failed: " + message.getContent(), t);
-                                                 return Mono.justOrEmpty(t.getMessage());
+                                                 return Mono.just(Optional.ofNullable(t.getMessage())
+                                                                          .filter(s -> !s.isBlank())
+                                                                          .map(s -> "```\n" + s + "\n```")
+                                                                          .orElse("*An error has occurred*"));
                                              })
                                              .flatMap(reply -> replyTo(message, reply));
                            } catch (ParameterException e) {

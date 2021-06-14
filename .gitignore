@@ -16,3 +16,4 @@ banman/out
 /banman/.project
 /banman/.settings/
 /banman/bin
+/*.toml

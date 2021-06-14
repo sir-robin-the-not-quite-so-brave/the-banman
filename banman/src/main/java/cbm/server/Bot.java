@@ -7,6 +7,7 @@ import cbm.server.bot.PingCommand;
 import cbm.server.bot.ProfileCommand;
 import cbm.server.bot.RemoveBanCommand;
 import cbm.server.bot.SearchCommand;
+import cbm.server.bot.WantedCommand;
 import cbm.server.db.BansDatabase;
 import cbm.server.model.Ban;
 import discord4j.common.util.Snowflake;
@@ -20,8 +21,10 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import picocli.CommandLine;
+import picocli.CommandLine.ArgGroup;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
+import picocli.CommandLine.Parameters;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.function.Tuple2;
@@ -29,54 +32,38 @@ import reactor.util.function.Tuples;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
-import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-@Command(name = "Bot", mixinStandardHelpOptions = true, version = "0.1")
+@Command(name = "Bot", mixinStandardHelpOptions = true, version = "1.0")
 public class Bot implements Callable<Integer> {
 
     private static final Logger LOGGER = LogManager.getLogger();
 
-    @Option(names = {"-t", "--token"}, required = true)
+    @Option(names = {"-t", "--token"}, required = true, description = "The Discord bot token.")
     private String discordToken;
 
-    @Option(names = {"--db"}, required = true)
-    private String bansDatabaseDir;
+    @Option(names = {"--reset-watchlist"}, description = "Resets the watch database.")
+    private boolean resetWatchlist;
 
-    @Option(names = {"-c", "--channel"}, arity = "1..*")
-    private Set<String> allowedDiscordChannels;
+    @ArgGroup(exclusive = false, heading = "Chivalry server options:%n")
+    private ChivalryServer chivalryServer;
 
-    @Option(names = {"-r", "--role"}, arity = "0..*")
-    private Set<String> allowedRoles;
-
-    @Option(names = {"--host"}, required = true)
-    private String hostname;
-
-    @Option(names = {"--log-path"}, defaultValue = "/UDKGame/Config/PCServer-UDKGame.ini")
-    private String logPath;
-
-    @Option(names = {"-u", "--user"}, required = true)
-    private String username;
-
-    @Option(names = {"-p", "--password"}, required = true)
-    private String password;
-
-    @Option(names = {"--prefix"}, defaultValue = "!bm")
-    private String prefix;
+    @Parameters(arity = "1", paramLabel = "<path/to/conf.toml>", description = "The Bot configuration.")
+    private Path configurationPath;
 
     public static void main(String[] args) {
         final CommandLine commandLine = new CommandLine(new Bot());
@@ -85,24 +72,14 @@ public class Bot implements Callable<Integer> {
 
     @Override
     public Integer call() throws IOException {
-        var roles =
-                Optional.ofNullable(allowedRoles)
-                        .orElse(Collections.emptySet())
-                        .stream()
-                        .map(s -> s.split(",", 2))
-                        .filter(a -> a.length == 2)
-                        .collect(Collectors.toMap(a -> Snowflake.of(a[0]),
-                                                  a -> Set.of(Snowflake.of(a[1])),
-                                                  Bot::union));
+        final Configuration configuration = Configuration.load(configurationPath);
 
         final ScheduledExecutorService executorService = Executors.newSingleThreadScheduledExecutor();
-        final LogDownloader logDownloader = new LogDownloader(hostname, logPath, username, password);
+        final LogDownloader logDownloader = new LogDownloader(chivalryServer);
 
-        final Set<Snowflake> channelIds =
-                allowedDiscordChannels.stream()
-                                      .map(Snowflake::of)
-                                      .collect(Collectors.toSet());
-        try (final BansDatabase bansDatabase = new BansDatabase(bansDatabaseDir)) {
+        try (final BansDatabase bansDatabase = new BansDatabase(configuration.getDatabase())) {
+            if (resetWatchlist)
+                bansDatabase.clearMentionsData();
 
             executorService.scheduleAtFixedRate(() -> updateBans(logDownloader, bansDatabase),
                                                 10, 3600, TimeUnit.SECONDS);
@@ -117,33 +94,33 @@ public class Bot implements Callable<Integer> {
             }, 1, 1, TimeUnit.DAYS);
 
             final var handler =
-                    new MessageHandler(prefix, channelIds, roles,
+                    new MessageHandler(configuration,
                                        () -> new CommandLine(new Cmd())
                                                      .addSubcommand(new PingCommand())
                                                      .addSubcommand(new ProfileCommand())
                                                      .addSubcommand(new LogCommand(bansDatabase))
                                                      .addSubcommand(new SearchCommand(bansDatabase))
+                                                     .addSubcommand(new WantedCommand(bansDatabase))
                                                      .addSubcommand(new AddBanCommand(bansDatabase))
                                                      .addSubcommand(new RemoveBanCommand(bansDatabase))
                                                      .addSubcommand(new ListBansCommand(bansDatabase)));
 
-            final GatewayDiscordClient client = DiscordClientBuilder.create(discordToken)
-                                                                    .build()
-                                                                    .login()
-                                                                    .block();
-
-            assert client != null;
+            final GatewayDiscordClient client =
+                    Objects.requireNonNull(DiscordClientBuilder.create(discordToken)
+                                                               .build()
+                                                               .login()
+                                                               .block());
 
             final Duration delay = getDelayUntil(LocalTime.parse("06:00:00"));
             LOGGER.info("Delay to first stats: {}", delay);
-            executorService.scheduleAtFixedRate(() -> showStats(bansDatabase, client),
+            executorService.scheduleAtFixedRate(() -> showStats(bansDatabase, client, configuration),
                                                 delay.toSeconds(), 24 * 3600, TimeUnit.SECONDS);
 
             client.getEventDispatcher().on(ReadyEvent.class)
                   .subscribe(event -> {
                       final User self = event.getSelf();
                       LOGGER.info("Logged in as {}#{}. Command prefix is {}",
-                                  self.getUsername(), self.getDiscriminator(), prefix);
+                                  self.getUsername(), self.getDiscriminator(), configuration.getPrefix());
                   });
 
             client.getEventDispatcher().on(MessageCreateEvent.class)
@@ -151,9 +128,35 @@ public class Bot implements Callable<Integer> {
                   .flatMap(handler::handle)
                   .subscribe();
 
+            final Set<Snowflake> watchListChannels = configuration.getWatchListChannels();
+
+            client.getEventDispatcher().on(MessageCreateEvent.class)
+                  .map(MessageCreateEvent::getMessage)
+                  .filter(message -> watchListChannels.contains(message.getChannelId()))
+                  .flatMap(message -> message.getChannel()
+                                             .flatMap(channel -> new ChannelWatcher(channel, bansDatabase)
+                                                                         .updateChannel(message.getId()))
+                                             .doOnNext(stats -> LOGGER.info("Processed mentions: {}", stats)))
+                  .subscribe();
+
+            updateMentions(bansDatabase, client, watchListChannels)
+                    .subscribe();
+
             client.onDisconnect().block();
             return 0;
         }
+    }
+
+    private Mono<Void> updateMentions(BansDatabase bansDatabase, GatewayDiscordClient client,
+                                      Set<Snowflake> channelIds) {
+
+        return Flux.fromIterable(channelIds)
+                   .flatMap(client::getChannelById)
+                   .filter(MessageChannel.class::isInstance)
+                   .cast(MessageChannel.class)
+                   .flatMap(channel -> new ChannelWatcher(channel, bansDatabase).updateChannel())
+                   .doOnNext(stats -> LOGGER.info("Processed mentions: {}", stats))
+                   .then();
     }
 
     /**
@@ -184,7 +187,8 @@ public class Bot implements Callable<Integer> {
         }
     }
 
-    private void showStats(BansDatabase bansDatabase, GatewayDiscordClient client) {
+    private void showStats(BansDatabase bansDatabase, GatewayDiscordClient client, Configuration configuration) {
+
         final Mono<String> statsMessage =
                 getYesterdaysStats(bansDatabase)
                         .map(stats -> String.format("There were %,d bans added and %,d bans removed yesterday.",
@@ -197,13 +201,12 @@ public class Bot implements Callable<Integer> {
                             .map(list -> String.format("\n\nThere are %,d offline bans that need attention. " +
                                                                "Please use `%s list-bans` to see them.",
                                                        list.size(),
-                                                       prefix))
+                                                       configuration.getPrefix()))
                             .defaultIfEmpty("");
 
         Mono.zip(statsMessage, offlineMessage)
             .map(t -> t.getT1() + t.getT2())
-            .flatMapMany(msg -> Flux.fromIterable(allowedDiscordChannels)
-                                    .map(Snowflake::of)
+            .flatMapMany(msg -> Flux.fromIterable(configuration.getReplyToChannels())
                                     .flatMap(id -> client.getChannelById(id)
                                                          .filter(MessageChannel.class::isInstance)
                                                          .cast(MessageChannel.class)
@@ -266,18 +269,23 @@ public class Bot implements Callable<Integer> {
                        .map(TextUtils::printable);
     }
 
-    public static <T> @NotNull Set<T> union(@NotNull Set<T> s1, @NotNull Set<T> s2) {
-        return Stream.concat(s1.stream(), s2.stream())
-                     .collect(Collectors.toSet());
-    }
-
-    public static <T> @NotNull Set<T> intersection(@NotNull Set<T> s1, @NotNull Set<T> s2) {
-        return s1.stream()
-                 .filter(s2::contains)
-                 .collect(Collectors.toSet());
-    }
-
     @Command(header = "Chivalry Ban Manager%n")
     private static class Cmd {
+    }
+
+    public static class ChivalryServer {
+        @Option(names = {"--host"}, required = true, description = "The chivalry server IP address.")
+        public String hostname;
+
+        @Option(names = {"--log-path"}, defaultValue = "/UDKGame/Config/PCServer-UDKGame.ini",
+                showDefaultValue = CommandLine.Help.Visibility.ALWAYS,
+                description = "Path to the bans configuration file.")
+        public String logPath;
+
+        @Option(names = {"-u", "--user"}, required = true, description = "FTP access user name.")
+        public String username;
+
+        @Option(names = {"-p", "--password"}, required = true, description = "FTP access password.")
+        public String password;
     }
 }

@@ -81,7 +81,7 @@ public class AddBanCommand implements BotCommand {
                   .flatMapMany(id -> Bot.getPlayerName(id)
                                         .switchIfEmpty(Mono.just("player_" + id.steamID64()))
                                         .map(name -> new OfflineBan.Builder()
-                                                             .setId(Long.toString(id.steamID64()))
+                                                             .setId(id.s64())
                                                              .setDurationSeconds(seconds)
                                                              .setPlayerName(name)
                                                              .setReason(reason)

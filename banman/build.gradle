@@ -45,6 +45,7 @@ dependencies {
     implementation group: 'org.apache.lucene', name: 'lucene-analyzers-common', version: '8.8.2'
 
     implementation group: 'com.github.ben-manes.caffeine', name: 'caffeine', version: '3.0.2'
+    implementation group: 'org.tomlj', name: 'tomlj', version: '1.0.0'
 }
 
 application {
