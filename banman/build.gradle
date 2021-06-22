@@ -46,6 +46,8 @@ dependencies {
 
     implementation group: 'com.github.ben-manes.caffeine', name: 'caffeine', version: '3.0.2'
     implementation group: 'org.tomlj', name: 'tomlj', version: '1.0.0'
+
+    implementation group: 'org.nibor.autolink', name: 'autolink', version: '0.10.0'
 }
 
 application {

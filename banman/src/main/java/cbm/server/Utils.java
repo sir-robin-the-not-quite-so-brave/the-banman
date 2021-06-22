@@ -1,27 +1,22 @@
 package cbm.server;
 
 import org.jetbrains.annotations.NotNull;
+import org.nibor.autolink.LinkExtractor;
+import org.nibor.autolink.LinkType;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class Utils {
-
-    private static final Pattern URL_PATTERN = Pattern.compile(
-            "(?:^|[\\W])((ht|f)tp(s?)://|www\\.)"
-                    + "(([\\w\\-]+\\.){1,}?([\\w\\-.~]+/?)*"
-                    + "[\\p{Alnum}.,%_=?&#\\-+()\\[\\]*$~@!:/{};']*)",
-            Pattern.CASE_INSENSITIVE | Pattern.MULTILINE | Pattern.DOTALL);
 
     public static <T> Mono<T> asyncOne(Callable<T> callable) {
         return Mono.defer(() -> Mono.fromCallable(callable)
@@ -33,6 +28,7 @@ public class Utils {
                                     .subscribeOn(Schedulers.elastic()));
     }
 
+    @SuppressWarnings("unused")
     public static <T> @NotNull Set<T> union(@NotNull Set<T> s1, @NotNull Set<T> s2) {
         return Stream.concat(s1.stream(), s2.stream())
                      .collect(Collectors.toSet());
@@ -47,12 +43,13 @@ public class Utils {
     public static @NotNull List<String> extractUrls(@NotNull String content) {
         final List<String> urls = new ArrayList<>();
 
-        final Matcher matcher = URL_PATTERN.matcher(content);
-        while (matcher.find()) {
-            final int matchStart = matcher.start(1);
-            final int matchEnd = matcher.end();
-            final String url = content.substring(matchStart, matchEnd);
-            urls.add(url);
+        final var linkSpans = LinkExtractor.builder()
+                                           .linkTypes(EnumSet.of(LinkType.URL))
+                                           .build()
+                                           .extractLinks(content);
+        for (var linkSpan : linkSpans) {
+            final String link = content.substring(linkSpan.getBeginIndex(), linkSpan.getEndIndex());
+            urls.add(link);
         }
 
         return urls;
