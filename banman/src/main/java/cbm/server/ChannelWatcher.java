@@ -55,7 +55,8 @@ public class ChannelWatcher {
     private Mono<Stats> process(@NotNull Snowflake from, @Nullable Snowflake to) {
         LOGGER.info("Reading channel {} messages from {} back to {}", channelName, from, to);
         final Stats stats = new Stats();
-        return channel.getMessagesBefore(from)
+        return channel.getMessageById(from)
+                      .concatWith(channel.getMessagesBefore(from))
                       .takeWhile(to != null ? message -> message.getId().compareTo(to) >= 0
                                             : message -> true)
                       .take(1000)
@@ -63,6 +64,8 @@ public class ChannelWatcher {
                       .filter(message -> message.getAuthor().map(user -> !user.isBot()).orElse(true))
                       .flatMap(message -> {
                           final List<String> urls = Utils.extractUrls(message.getContent());
+                          LOGGER.debug("[{}:{}] Found {} URLs. Message: {}", channelName, message.getId(),
+                                       urls.size(), message.getContent());
                           return Flux.fromIterable(urls)
                                      .filter(ChannelWatcher::isProfileUrl)
                                      .flatMap(ChannelWatcher::resolveSteamID)
