@@ -58,7 +58,7 @@ public class MessageHandler {
     }
 
     @NotNull
-    private static Mono<Message> replyTo(Message message, String response) {
+    public static Mono<Message> replyTo(Message message, String response) {
         final String rs;
         if (response.getBytes(StandardCharsets.UTF_8).length > MessageComposer.MAX_MESSAGE_LENGTH) {
             LOGGER.error("Response message too long!", new RuntimeException());
@@ -101,15 +101,14 @@ public class MessageHandler {
                                if (command instanceof HelpCommand)
                                    ((HelpCommand) command).init(parsed.commandSpec().commandLine());
 
-                               return command.execute(message)
+                               return command.executeFull(message)
                                              .onErrorResume(t -> {
                                                  LOGGER.warn("Command handler failed: " + message.getContent(), t);
-                                                 return Mono.just(Optional.ofNullable(t.getMessage())
-                                                                          .filter(s -> !s.isBlank())
-                                                                          .map(s -> "```\n" + s + "\n```")
-                                                                          .orElse("*An error has occurred*"));
-                                             })
-                                             .flatMap(reply -> replyTo(message, reply));
+                                                 return replyTo(message, Optional.ofNullable(t.getMessage())
+                                                                                 .filter(s -> !s.isBlank())
+                                                                                 .map(s -> "```\n" + s + "\n```")
+                                                                                 .orElse("*An error has occurred*"));
+                                             });
                            } catch (ParameterException e) {
                                return replyTo(message, e.getMessage());
                            }

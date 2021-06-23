@@ -4,15 +4,20 @@ import cbm.server.Bot;
 import cbm.server.db.BansDatabase;
 import cbm.server.model.Mention;
 import discord4j.common.util.Snowflake;
+import discord4j.core.object.entity.Member;
 import discord4j.core.object.entity.Message;
+import discord4j.core.object.entity.channel.MessageChannel;
+import discord4j.core.object.entity.channel.TextChannel;
+import discord4j.rest.util.Color;
 import org.jetbrains.annotations.NotNull;
+import org.reactivestreams.Publisher;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 @Command(name = "wanted", header = "List player mentions in the watch-list channels", synopsisHeading = "%nUsage: ",
         description = {"%nShow links to mentions for the given player in the watch-list channel.%n"})
@@ -35,22 +40,50 @@ public class WantedCommand implements BotCommand {
     }
 
     @Override
-    public @NotNull Flux<String> execute(@NotNull Message message) {
-        return Bot.resolveSteamID(idOrUrl)
-                  .flatMapMany(bansDatabase::findMentions)
-                  .collectList()
-                  .flatMapMany(mentions -> {
-                      if (mentions.isEmpty())
-                          return Flux.just("**No mentions found.**");
-                      final List<String> links = mentions.stream()
-                                                           .map(this::toLink)
-                                                           .collect(Collectors.toList());
-                      final MessageComposer composer =
-                              new MessageComposer.Builder()
-                                      .setHeader("**Mentions found:**")
-                                      .build();
-                      return Flux.fromIterable(composer.compose(links));
-                  });
+    public @NotNull Flux<Message> executeFull(@NotNull Message message) {
+        return message.getChannel()
+                      .flatMapMany(channel -> Bot.resolveSteamID(idOrUrl)
+                                                 .flatMapMany(bansDatabase::findMentions)
+                                                 .collectList()
+                                                 .flatMapMany(mentions -> toMessages(channel, mentions)));
+    }
+
+    private Publisher<Message> toMessages(MessageChannel channel, List<Mention> mentions) {
+        if (mentions.isEmpty())
+            return channel.createMessage("**No mentions found.**");
+
+        return Flux.fromIterable(mentions)
+                   .flatMap(mention -> message(channel, mention));
+    }
+
+    private Mono<Message> message(MessageChannel channel, Mention mention) {
+        final Snowflake guildId = mention.getGuildId();
+        return channel.getClient()
+                      .getGuildById(guildId)
+                      .flatMap(guild -> guild.getChannelById(mention.getChannelId()))
+                      .filter(TextChannel.class::isInstance)
+                      .cast(TextChannel.class)
+                      .flatMap(ch -> message(channel, mention, ch));
+    }
+
+    @NotNull
+    private Mono<Message> message(MessageChannel channel, Mention mention, TextChannel mentionChannel) {
+        return mentionChannel.getMessageById(mention.getMessageId())
+                             .flatMap(Message::getAuthorAsMember)
+                             .flatMap(author -> author.getColor()
+                                                      .flatMap(color -> message(channel, mention, mentionChannel,
+                                                                                author, color)));
+    }
+
+    private Mono<Message> message(MessageChannel channel, Mention mention, TextChannel mentionChannel, Member author,
+                                  Color color) {
+
+        return channel.createEmbed(e -> e.setColor(color)
+                                         .setTitle("Go to mention")
+                                         .setDescription("Mentioned in channel #" + mentionChannel.getName())
+                                         .setUrl(toLink(mention))
+                                         .setAuthor(author.getDisplayName(), null, author.getAvatarUrl())
+                                         .setTimestamp(mention.getMentionedAt()));
     }
 
     private String toLink(Mention mention) {
@@ -59,8 +92,7 @@ public class WantedCommand implements BotCommand {
                         .map(Snowflake::asString)
                         .orElse("");
 
-        return String.format("%s - https://discord.com/channels/%s/%s/%s",
-                             mention.getMentionedAt(),
+        return String.format("https://discord.com/channels/%s/%s/%s",
                              guildId,
                              mention.getChannelId().asString(),
                              mention.getMessageId().asString());
