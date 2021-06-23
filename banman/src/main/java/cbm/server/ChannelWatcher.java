@@ -3,8 +3,7 @@ package cbm.server;
 import cbm.server.db.BansDatabase;
 import cbm.server.model.Mention;
 import discord4j.common.util.Snowflake;
-import discord4j.core.object.entity.channel.GuildChannel;
-import discord4j.core.object.entity.channel.MessageChannel;
+import discord4j.core.object.entity.channel.GuildMessageChannel;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
@@ -22,22 +21,16 @@ public class ChannelWatcher {
     private static final Pattern STEAM_URL_RX =
             Pattern.compile("https?://steamcommunity\\.com/(?:profiles|id)/.+", Pattern.CASE_INSENSITIVE);
 
-    private final MessageChannel channel;
+    private final GuildMessageChannel channel;
     private final BansDatabase bansDatabase;
     private final String channelName;
     private final Snowflake guildId;
 
-    public ChannelWatcher(MessageChannel channel, BansDatabase bansDatabase) {
+    public ChannelWatcher(GuildMessageChannel channel, BansDatabase bansDatabase) {
         this.channel = channel;
         this.bansDatabase = bansDatabase;
-        if (channel instanceof GuildChannel) {
-            final GuildChannel guildChannel = (GuildChannel) channel;
-            this.channelName = guildChannel.getName();
-            this.guildId = guildChannel.getGuildId();
-        } else {
-            this.channelName = channel.getId().toString();
-            this.guildId = null;
-        }
+        this.channelName = channel.getName();
+        this.guildId = channel.getGuildId();
     }
 
     public Mono<Stats> updateChannel() {

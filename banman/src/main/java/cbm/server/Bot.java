@@ -16,6 +16,7 @@ import discord4j.core.GatewayDiscordClient;
 import discord4j.core.event.domain.lifecycle.ReadyEvent;
 import discord4j.core.event.domain.message.MessageCreateEvent;
 import discord4j.core.object.entity.User;
+import discord4j.core.object.entity.channel.GuildMessageChannel;
 import discord4j.core.object.entity.channel.MessageChannel;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -134,6 +135,7 @@ public class Bot implements Callable<Integer> {
                   .map(MessageCreateEvent::getMessage)
                   .filter(message -> watchListChannels.contains(message.getChannelId()))
                   .flatMap(message -> message.getChannel()
+                                             .cast(GuildMessageChannel.class)
                                              .flatMap(channel -> new ChannelWatcher(channel, bansDatabase)
                                                                          .updateChannel(message.getId()))
                                              .doOnNext(stats -> LOGGER.info("Processed mentions: {}", stats)))
@@ -152,8 +154,9 @@ public class Bot implements Callable<Integer> {
 
         return Flux.fromIterable(channelIds)
                    .flatMap(client::getChannelById)
-                   .filter(MessageChannel.class::isInstance)
-                   .cast(MessageChannel.class)
+                   .filter(GuildMessageChannel.class::isInstance)
+                   .cast(GuildMessageChannel.class)
+                   .doOnNext(channel -> LOGGER.info("Monitoring channel #{}", channel.getName()))
                    .flatMap(channel -> new ChannelWatcher(channel, bansDatabase).updateChannel())
                    .doOnNext(stats -> LOGGER.info("Processed mentions: {}", stats))
                    .then();

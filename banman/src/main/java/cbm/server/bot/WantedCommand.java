@@ -17,7 +17,6 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
-import java.util.Optional;
 
 @Command(name = "wanted", header = "List player mentions in the watch-list channels", synopsisHeading = "%nUsage: ",
         description = {"%nShow links to mentions for the given player in the watch-list channel.%n"})
@@ -79,21 +78,16 @@ public class WantedCommand implements BotCommand {
                                   Color color) {
 
         return channel.createEmbed(e -> e.setColor(color)
-                                         .setTitle("Go to mention")
-                                         .setDescription("Mentioned in channel #" + mentionChannel.getName())
+                                         .setTitle("Jump to the mention")
+                                         .setDescription("Mentioned in **#" + mentionChannel.getName() + "**")
                                          .setUrl(toLink(mention))
                                          .setAuthor(author.getDisplayName(), null, author.getAvatarUrl())
                                          .setTimestamp(mention.getMentionedAt()));
     }
 
     private String toLink(Mention mention) {
-        final String guildId =
-                Optional.ofNullable(mention.getGuildId())
-                        .map(Snowflake::asString)
-                        .orElse("");
-
         return String.format("https://discord.com/channels/%s/%s/%s",
-                             guildId,
+                             mention.getGuildId().asString(),
                              mention.getChannelId().asString(),
                              mention.getMessageId().asString());
     }
