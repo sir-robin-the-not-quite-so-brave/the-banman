@@ -1,11 +1,17 @@
 package cbm.server.bot;
 
 import cbm.server.Bot;
+import cbm.server.SteamID;
+import cbm.server.SteamWeb;
 import discord4j.core.object.entity.Message;
+import discord4j.core.spec.EmbedCreateSpec;
+import discord4j.rest.util.Color;
 import org.jetbrains.annotations.NotNull;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
 import reactor.core.publisher.Flux;
+
+import static cbm.server.SteamWeb.playerProfile;
 
 @Command(name = "profile", header = "Show the canonical Steam profile URL", synopsisHeading = "%nUsage: ",
         description = {"%nUnlike the custom URL, the canonical one cannot be changed by the player.%n"})
@@ -22,9 +28,20 @@ public class ProfileCommand implements BotCommand {
     private String idOrUrl;
 
     @Override
-    public @NotNull Flux<String> execute(@NotNull Message message) {
+    public @NotNull Flux<Message> executeFull(@NotNull Message message) {
         return Bot.resolveSteamID(idOrUrl)
-                  .map(steamID -> "**Profile URL:** " + steamID.profileUrl())
+                  .flatMap(s -> playerProfile(s.profileUrl())
+                                        .flatMap(p -> message.getChannel()
+                                                             .flatMap(ch -> ch.createEmbed(e -> embed(e, s, p)))))
                   .flux();
+    }
+
+    private void embed(EmbedCreateSpec spec, SteamID steamID, SteamWeb.Profile profile) {
+        spec.setUrl(profile.getUrl())
+            .setTitle(profile.getName())
+            .setThumbnail(profile.getAvatar())
+            .setColor(Color.SUMMER_SKY)
+            .addField("Steam ID64", "`" + steamID.steamID64() + "`", true)
+            .addField("Steam ID", "`" + steamID.steamID() + "`", true);
     }
 }
