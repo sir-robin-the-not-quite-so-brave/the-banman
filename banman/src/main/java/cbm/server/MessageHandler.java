@@ -86,7 +86,9 @@ public class MessageHandler {
                                if (requiresPrefix && (args.length == 0 || !prefix.equalsIgnoreCase(args[0])))
                                    return Flux.empty();
 
-                               COMMAND_LOGGER.info("{}", message.getContent());
+                               COMMAND_LOGGER.info("{}: {}",
+                                                   message.getAuthor().map(User::getUsername),
+                                                   message.getContent());
 
                                final String[] withoutPrefix = removeOptionalPrefix(args);
 
