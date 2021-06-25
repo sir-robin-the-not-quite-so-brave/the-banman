@@ -21,6 +21,7 @@ public class Configuration {
     private static final Logger LOGGER = LogManager.getLogger();
     private final String prefix;
     private final String database;
+    private final String userGuide;
     private final Set<Snowflake> watchListChannels;
     private final Set<Snowflake> replyToChannels;
     private final Map<Snowflake, Set<Snowflake>> replyToRoles;
@@ -28,6 +29,7 @@ public class Configuration {
     private Configuration(Builder builder) {
         this.prefix = builder.prefix;
         this.database = builder.database;
+        this.userGuide = builder.userGuide;
         this.watchListChannels = builder.watchListChannels;
         this.replyToChannels = builder.replyToChannels;
         this.replyToRoles = builder.replyToRoles;
@@ -39,6 +41,10 @@ public class Configuration {
 
     public String getDatabase() {
         return database;
+    }
+
+    public String getUserGuide() {
+        return userGuide;
     }
 
     public Set<Snowflake> getWatchListChannels() {
@@ -73,7 +79,8 @@ public class Configuration {
 
         final Builder builder = new Builder()
                                         .setPrefix(result.getString("general.prefix"))
-                                        .setDatabase(result.getString("general.database-path"));
+                                        .setDatabase(result.getString("general.database-path"))
+                                        .setUserGuide(result.getString("general.user-guide"));
 
         final TomlTable guilds = result.getTable("guilds");
 
@@ -111,6 +118,7 @@ public class Configuration {
     public static class Builder {
         private String prefix;
         private String database;
+        private String userGuide;
         private final Set<Snowflake> watchListChannels = new TreeSet<>();
         private final Set<Snowflake> replyToChannels = new TreeSet<>();
         private final Map<Snowflake, Set<Snowflake>> replyToRoles = new TreeMap<>();
@@ -126,6 +134,11 @@ public class Configuration {
 
         public Builder setDatabase(String database) {
             this.database = database;
+            return this;
+        }
+
+        public Builder setUserGuide(String userGuide) {
+            this.userGuide = userGuide;
             return this;
         }
 

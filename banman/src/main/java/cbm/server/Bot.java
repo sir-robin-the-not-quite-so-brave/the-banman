@@ -2,6 +2,7 @@ package cbm.server;
 
 import cbm.server.bot.AddBanCommand;
 import cbm.server.bot.ColorCommand;
+import cbm.server.bot.GuideCommand;
 import cbm.server.bot.ListBansCommand;
 import cbm.server.bot.LogCommand;
 import cbm.server.bot.PingCommand;
@@ -100,6 +101,7 @@ public class Bot implements Callable<Integer> {
             final var handler =
                     new MessageHandler(configuration,
                                        () -> new CommandLine(new Cmd())
+                                                     .addSubcommand(new GuideCommand(configuration.getUserGuide()))
                                                      .addSubcommand(new PingCommand())
                                                      .addSubcommand(new ColorCommand())
                                                      .addSubcommand(new ProfileCommand())
