@@ -1,6 +1,8 @@
 package cbm.server;
 
 import cbm.server.bot.AddBanCommand;
+import cbm.server.bot.ColorCommand;
+import cbm.server.bot.GuideCommand;
 import cbm.server.bot.ListBansCommand;
 import cbm.server.bot.LogCommand;
 import cbm.server.bot.PingCommand;
@@ -16,7 +18,10 @@ import discord4j.core.GatewayDiscordClient;
 import discord4j.core.event.domain.lifecycle.ReadyEvent;
 import discord4j.core.event.domain.message.MessageCreateEvent;
 import discord4j.core.object.entity.User;
+import discord4j.core.object.entity.channel.GuildMessageChannel;
 import discord4j.core.object.entity.channel.MessageChannel;
+import discord4j.core.spec.EmbedCreateSpec;
+import discord4j.rest.util.Color;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
@@ -96,7 +101,9 @@ public class Bot implements Callable<Integer> {
             final var handler =
                     new MessageHandler(configuration,
                                        () -> new CommandLine(new Cmd())
+                                                     .addSubcommand(new GuideCommand(configuration.getUserGuide()))
                                                      .addSubcommand(new PingCommand())
+                                                     .addSubcommand(new ColorCommand())
                                                      .addSubcommand(new ProfileCommand())
                                                      .addSubcommand(new LogCommand(bansDatabase))
                                                      .addSubcommand(new SearchCommand(bansDatabase))
@@ -134,6 +141,7 @@ public class Bot implements Callable<Integer> {
                   .map(MessageCreateEvent::getMessage)
                   .filter(message -> watchListChannels.contains(message.getChannelId()))
                   .flatMap(message -> message.getChannel()
+                                             .cast(GuildMessageChannel.class)
                                              .flatMap(channel -> new ChannelWatcher(channel, bansDatabase)
                                                                          .updateChannel(message.getId()))
                                              .doOnNext(stats -> LOGGER.info("Processed mentions: {}", stats)))
@@ -152,8 +160,9 @@ public class Bot implements Callable<Integer> {
 
         return Flux.fromIterable(channelIds)
                    .flatMap(client::getChannelById)
-                   .filter(MessageChannel.class::isInstance)
-                   .cast(MessageChannel.class)
+                   .filter(GuildMessageChannel.class::isInstance)
+                   .cast(GuildMessageChannel.class)
+                   .doOnNext(channel -> LOGGER.info("Monitoring channel #{}", channel.getName()))
                    .flatMap(channel -> new ChannelWatcher(channel, bansDatabase).updateChannel())
                    .doOnNext(stats -> LOGGER.info("Processed mentions: {}", stats))
                    .then();
@@ -187,32 +196,31 @@ public class Bot implements Callable<Integer> {
         }
     }
 
-    private void showStats(BansDatabase bansDatabase, GatewayDiscordClient client, Configuration configuration) {
-
-        final Mono<String> statsMessage =
-                getYesterdaysStats(bansDatabase)
-                        .map(stats -> String.format("There were %,d bans added and %,d bans removed yesterday.",
-                                                    stats.numAdded(), stats.numRemoved()));
-
-        final Mono<String> offlineMessage =
-                bansDatabase.getOfflineBans()
-                            .collectList()
-                            .filter(list -> !list.isEmpty())
-                            .map(list -> String.format("\n\nThere are %,d offline bans that need attention. " +
-                                                               "Please use `%s list-bans` to see them.",
-                                                       list.size(),
-                                                       configuration.getPrefix()))
-                            .defaultIfEmpty("");
-
-        Mono.zip(statsMessage, offlineMessage)
-            .map(t -> t.getT1() + t.getT2())
-            .flatMapMany(msg -> Flux.fromIterable(configuration.getReplyToChannels())
-                                    .flatMap(id -> client.getChannelById(id)
-                                                         .filter(MessageChannel.class::isInstance)
-                                                         .cast(MessageChannel.class)
-                                                         .flatMap(channel -> channel.createMessage(msg))
-                                                         .then()))
+    private void showStats(BansDatabase bansDatabase, GatewayDiscordClient client, Configuration conf) {
+        final Mono<BansDatabase.Stats> yesterdaysStats = getYesterdaysStats(bansDatabase);
+        final Mono<Integer> offlineBansCount = bansDatabase.getOfflineBans()
+                                                           .collectList()
+                                                           .map(List::size);
+        Mono.zip(yesterdaysStats, offlineBansCount)
+            .flatMapMany(t2 -> Flux.fromIterable(conf.getReplyToChannels())
+                                   .flatMap(client::getChannelById)
+                                   .filter(MessageChannel.class::isInstance)
+                                   .cast(MessageChannel.class)
+                                   .flatMap(ch -> ch.createEmbed(e -> showStats(e, t2.getT1(), t2.getT2(), conf))))
             .blockLast();
+    }
+
+    private void showStats(EmbedCreateSpec spec, BansDatabase.Stats stats, int offlineBans, Configuration conf) {
+        spec.setTitle("Ban stats")
+            .setColor(Color.VIVID_VIOLET)
+            .addField("Added bans", Integer.toString(stats.numAdded()), true)
+            .addField("Removed bans", Integer.toString(stats.numRemoved()), true)
+            .addField("Offline bans", Integer.toString(offlineBans), true);
+
+        if (offlineBans > 0)
+            spec.setDescription(String.format("There are offline bans that need attention. " +
+                                                      "Please use `%s list-bans` to see them.",
+                                              conf.getPrefix()));
     }
 
     private Mono<BansDatabase.Stats> getYesterdaysStats(BansDatabase bansDatabase) {

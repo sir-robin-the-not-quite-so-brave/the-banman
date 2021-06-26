@@ -10,6 +10,8 @@ import org.tomlj.TomlParseResult;
 import org.tomlj.TomlTable;
 
 import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Set;
@@ -21,6 +23,7 @@ public class Configuration {
     private static final Logger LOGGER = LogManager.getLogger();
     private final String prefix;
     private final String database;
+    private final String userGuide;
     private final Set<Snowflake> watchListChannels;
     private final Set<Snowflake> replyToChannels;
     private final Map<Snowflake, Set<Snowflake>> replyToRoles;
@@ -28,9 +31,26 @@ public class Configuration {
     private Configuration(Builder builder) {
         this.prefix = builder.prefix;
         this.database = builder.database;
+        this.userGuide = validateUserGuide(builder.userGuide);
         this.watchListChannels = builder.watchListChannels;
         this.replyToChannels = builder.replyToChannels;
         this.replyToRoles = builder.replyToRoles;
+    }
+
+    private static String validateUserGuide(String userGuide) {
+        if (userGuide == null) {
+            LOGGER.warn("general.user-guide is not set. The guide command will not work correctly.");
+            return null;
+        }
+
+        try {
+            new URL(userGuide);
+            return userGuide;
+        } catch (MalformedURLException e) {
+            LOGGER.warn("general.user-guide is not a valid URL: {}. The guide command will not work correctly.",
+                        userGuide);
+            return null;
+        }
     }
 
     public String getPrefix() {
@@ -39,6 +59,10 @@ public class Configuration {
 
     public String getDatabase() {
         return database;
+    }
+
+    public String getUserGuide() {
+        return userGuide;
     }
 
     public Set<Snowflake> getWatchListChannels() {
@@ -73,7 +97,8 @@ public class Configuration {
 
         final Builder builder = new Builder()
                                         .setPrefix(result.getString("general.prefix"))
-                                        .setDatabase(result.getString("general.database-path"));
+                                        .setDatabase(result.getString("general.database-path"))
+                                        .setUserGuide(result.getString("general.user-guide"));
 
         final TomlTable guilds = result.getTable("guilds");
 
@@ -111,6 +136,7 @@ public class Configuration {
     public static class Builder {
         private String prefix;
         private String database;
+        private String userGuide;
         private final Set<Snowflake> watchListChannels = new TreeSet<>();
         private final Set<Snowflake> replyToChannels = new TreeSet<>();
         private final Map<Snowflake, Set<Snowflake>> replyToRoles = new TreeMap<>();
@@ -126,6 +152,11 @@ public class Configuration {
 
         public Builder setDatabase(String database) {
             this.database = database;
+            return this;
+        }
+
+        public Builder setUserGuide(String userGuide) {
+            this.userGuide = userGuide;
             return this;
         }
 

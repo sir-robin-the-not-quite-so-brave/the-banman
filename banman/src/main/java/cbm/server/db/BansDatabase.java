@@ -549,8 +549,7 @@ public class BansDatabase implements AutoCloseable {
 
             final Entity entity = txn.newEntity(MENTIONS);
             entity.setProperty("player-id", mention.getPlayerId().s64());
-            if (mention.getGuildId() != null)
-                entity.setProperty("guild-id", mention.getGuildId());
+            entity.setProperty("guild-id", mention.getGuildId());
             entity.setProperty("channel-id", mention.getChannelId());
             entity.setProperty("message-id", mention.getMessageId());
             entity.setProperty("mentioned-at", mention.getMentionedAt());
@@ -577,7 +576,7 @@ public class BansDatabase implements AutoCloseable {
     @NotNull
     private Mention asMention(@NotNull SteamID steamID, @NotNull Entity entity) {
         final Instant mentionedAt = Objects.requireNonNull(getProperty(entity, "mentioned-at"));
-        final Snowflake guildId = getProperty(entity, "guild-id");
+        final Snowflake guildId = Objects.requireNonNull(getProperty(entity, "guild-id"));
         final Snowflake channelId = Objects.requireNonNull(getProperty(entity, "channel-id"));
         final Snowflake messageId = Objects.requireNonNull(getProperty(entity, "message-id"));
         return new Mention(steamID, mentionedAt, guildId, channelId, messageId);
