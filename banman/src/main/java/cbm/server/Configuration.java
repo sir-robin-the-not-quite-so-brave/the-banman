@@ -10,6 +10,8 @@ import org.tomlj.TomlParseResult;
 import org.tomlj.TomlTable;
 
 import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Set;
@@ -29,10 +31,26 @@ public class Configuration {
     private Configuration(Builder builder) {
         this.prefix = builder.prefix;
         this.database = builder.database;
-        this.userGuide = builder.userGuide;
+        this.userGuide = validateUserGuide(builder.userGuide);
         this.watchListChannels = builder.watchListChannels;
         this.replyToChannels = builder.replyToChannels;
         this.replyToRoles = builder.replyToRoles;
+    }
+
+    private static String validateUserGuide(String userGuide) {
+        if (userGuide == null) {
+            LOGGER.warn("general.user-guide is not set. The guide command will not work correctly.");
+            return null;
+        }
+
+        try {
+            new URL(userGuide);
+            return userGuide;
+        } catch (MalformedURLException e) {
+            LOGGER.warn("general.user-guide is not a valid URL: {}. The guide command will not work correctly.",
+                        userGuide);
+            return null;
+        }
     }
 
     public String getPrefix() {

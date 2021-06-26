@@ -20,9 +20,16 @@ public class GuideCommand implements BotCommand {
     public @NotNull Flux<Message> executeFull(@NotNull Message message) {
 
         return message.getChannel()
-                      .flatMap(ch -> ch.createEmbed(em -> em.setTitle("User guide")
-                                                            .setUrl(guideUrl)
-                                                            .setColor(Color.JAZZBERRY_JAM)))
+                      .flatMap(ch -> ch.createEmbed(em -> {
+                          em.setTitle("User guide");
+
+                          if (guideUrl != null)
+                              em.setUrl(guideUrl)
+                                .setColor(Color.JAZZBERRY_JAM);
+                          else
+                              em.setDescription("The user guide URL is not set.")
+                                .setColor(Color.RED);
+                      }))
                       .flux();
     }
 }
