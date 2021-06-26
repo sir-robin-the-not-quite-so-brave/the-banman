@@ -279,17 +279,6 @@ public class BansDatabase implements AutoCloseable {
         return duration1.compareTo(duration2);
     }
 
-    public boolean addOfflineBanSync(OfflineBan offlineBan) {
-        return entityStore.computeInTransaction(txn -> {
-            final EntityIterable entities = txn.find(OFFLINE_BAN, "player-id", offlineBan.getId());
-            if (!entities.isEmpty())
-                return false;
-
-            saveOfflineBan(offlineBan, txn.newEntity(OFFLINE_BAN));
-            return true;
-        });
-    }
-
     public boolean removeOfflineBanSync(SteamID steamID) {
         return entityStore.computeInTransaction(txn -> {
             boolean deleted = false;
@@ -311,8 +300,18 @@ public class BansDatabase implements AutoCloseable {
         });
     }
 
-    public Mono<Boolean> addOfflineBan(OfflineBan offlineBan) {
-        return asyncOne(() -> addOfflineBanSync(offlineBan));
+    public Mono<Boolean> addOfflineBan(OfflineBan offlineBan, boolean replace) {
+        return asyncOne(() -> entityStore.computeInTransaction(txn -> {
+            final EntityIterable entities = txn.find(OFFLINE_BAN, "player-id", offlineBan.getId());
+            if (replace)
+                for (var entity : entities)
+                    entity.delete();
+            else if (!entities.isEmpty())
+                return false;
+
+            saveOfflineBan(offlineBan, txn.newEntity(OFFLINE_BAN));
+            return true;
+        }));
     }
 
     public Mono<Boolean> removeOfflineBan(SteamID steamID) {

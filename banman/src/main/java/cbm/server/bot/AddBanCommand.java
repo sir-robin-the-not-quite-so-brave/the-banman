@@ -23,6 +23,9 @@ import java.time.temporal.ChronoUnit;
                 "See the 'list-bans' command for more details.%n"})
 public class AddBanCommand implements BotCommand {
 
+    @Option(names = "-f", description = "Force - if there is an existing offline ban, replace it")
+    private boolean force;
+
     @Option(names = "-g", description = "Only generate the ban line without adding it to the offline bans")
     private boolean onlyGenerate;
 
@@ -86,8 +89,9 @@ public class AddBanCommand implements BotCommand {
                                                              .setPlayerName(name)
                                                              .setReason(reason)
                                                              .build())
-                                        .flatMap(bansDatabase::addOfflineBan)
-                                        .map(added -> added ? "Ban successfully saved"
-                                                            : "There is an existing offline ban for this player"));
+                                        .flatMap(offlineBan -> bansDatabase.addOfflineBan(offlineBan, force))
+                                        .map(added -> added ? "Ban successfully saved."
+                                                            : "There is an existing offline ban for this player. " +
+                                                                      "Use the -f option to overwrite it."));
     }
 }
