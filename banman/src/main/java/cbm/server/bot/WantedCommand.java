@@ -19,7 +19,7 @@ import reactor.core.publisher.Mono;
 import java.util.List;
 
 @Command(name = "wanted", header = "List player mentions in the watch-list channels", synopsisHeading = "%nUsage: ",
-        description = {"%nShow links to mentions for the given player in the watch-list channel.%n"})
+        description = {"%nShow links to mentions for the given player in the watch-list channels.%n"})
 public class WantedCommand implements BotCommand {
 
     @Parameters(index = "0", paramLabel = "<id-or-url>",

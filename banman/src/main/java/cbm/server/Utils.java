@@ -7,6 +7,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
@@ -53,5 +54,18 @@ public class Utils {
         }
 
         return urls;
+    }
+
+    public static int compare(Duration duration1, Duration duration2) {
+        final boolean perma1 = duration1.isZero() || duration1.isNegative();
+        final boolean perma2 = duration2.isZero() || duration2.isNegative();
+
+        if (perma1 && perma2)
+            return 0;
+        if (perma1)
+            return 1;
+        if (perma2)
+            return -1;
+        return duration1.compareTo(duration2);
     }
 }
