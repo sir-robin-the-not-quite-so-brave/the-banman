@@ -146,8 +146,6 @@ public class InfoCommand implements BotCommand {
         @Override
         public Mono<Message> toMessage(MessageChannel channel) {
             return channel.createEmbed(spec -> {
-                spec.setTitle("Ban");
-
                 if (playerName != null)
                     spec.addField("Name", playerName, false);
 
@@ -157,15 +155,18 @@ public class InfoCommand implements BotCommand {
                     .addField("Until", InfoCommand.toString(bannedUntil), true);
 
                 if (removed == null) {
-                    spec.setColor(Color.RED)
+                    spec.setTitle("Current Ban")
+                        .setColor(Color.RED)
                         .addField("Duration", expectedDuration.toString(), true);
                 } else {
                     final Duration actualDuration = Duration.between(added, removed);
                     if (Utils.compare(expectedDuration, actualDuration) <= 0) {
-                        spec.setColor(Color.ORANGE)
+                        spec.setTitle("Fully Served Ban")
+                            .setColor(Color.ORANGE)
                             .addField("Duration", expectedDuration.toString(), true);
                     } else {
-                        spec.setColor(Color.DARK_GOLDENROD)
+                        spec.setTitle("Shortened Ban")
+                            .setColor(Color.DARK_GOLDENROD)
                             .addField("Removed at", InfoCommand.toString(removed), true)
                             .addField("Original Duration", expectedDuration.toString(), true)
                             .addField("Actual Duration", actualDuration.toString(), true);
@@ -212,8 +213,8 @@ public class InfoCommand implements BotCommand {
                                       Member author, Color color) {
 
             return channel.createEmbed(e -> e.setColor(color)
-                                             .setTitle("Jump to the mention")
-                                             .setDescription("Mentioned in **#" + mentionChannel.getName() + "**")
+                                             .setTitle("Mention")
+                                             .addField("Channel", "#" + mentionChannel.getName(), true)
                                              .setUrl(toLink(mention))
                                              .setAuthor(author.getDisplayName(), null, author.getAvatarUrl())
                                              .setTimestamp(mention.getMentionedAt()));
