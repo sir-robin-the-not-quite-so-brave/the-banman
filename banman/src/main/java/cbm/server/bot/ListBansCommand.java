@@ -106,10 +106,11 @@ public class ListBansCommand implements BotCommand {
 
         final String comment;
         if (ban.isNetIDBan())
-            comment = String.format("Replace previous NetID ban for `BannedIDs=(Uid=(A=%d,B=17825793))`",
+            comment = String.format("Replace previous NetID ban for \n" +
+                                            "```\nIPPolicies=DENY,\nBannedIDs=(Uid=(A=%d,B=17825793))\nwith```",
                                     steamID.uid());
         else
-            comment = String.format("Replace previous ban for `NetId=(Uid=(A=%d,B=17825793))`", steamID.uid());
+            comment = String.format("Replace previous ban for `NetId=(Uid=(A=%d,B=17825793))` with", steamID.uid());
         return String.join("\n", "", comment, banLine);
     }
 
