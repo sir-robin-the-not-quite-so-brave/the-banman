@@ -6,6 +6,7 @@ import cbm.server.db.BansDatabase;
 import cbm.server.db.BansDatabase.BanLogEntry;
 import cbm.server.model.Ban;
 import cbm.server.model.Mention;
+import cbm.server.model.OfflineBan;
 import discord4j.common.util.Snowflake;
 import discord4j.core.object.entity.Member;
 import discord4j.core.object.entity.Message;
@@ -28,6 +29,7 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 @Command(name = "info", header = "List player bans and mentions in the watch-list channels",
@@ -65,10 +67,18 @@ public class InfoCommand implements BotCommand {
                                                         bansDatabase.getBanHistory(steamID)
                                                                     .buffer(2)
                                                                     .map(this::combine);
+
                                                 final var mentions =
                                                         bansDatabase.findMentions(steamID)
                                                                     .map(MentionInfo::new);
-                                                return Flux.merge(banHistory, mentions)
+
+                                                final var offlineBans =
+                                                        bansDatabase.getOfflineBans()
+                                                                    .filter(b -> Objects.equals(b.getId(),
+                                                                                                steamID.s64()))
+                                                                    .map(OfflineBanInfo::new);
+
+                                                return Flux.merge(banHistory, mentions, offlineBans)
                                                            .sort()
                                                            .doOnNext(info -> LOGGER.debug("message: {} - {}",
                                                                                           info.sortBy(),
@@ -214,6 +224,41 @@ public class InfoCommand implements BotCommand {
                                  mention.getGuildId().asString(),
                                  mention.getChannelId().asString(),
                                  mention.getMessageId().asString());
+        }
+    }
+
+    private static class OfflineBanInfo implements Info {
+
+        private final @NotNull OfflineBan offlineBan;
+        private final @NotNull Instant enactedTime;
+
+        private OfflineBanInfo(@NotNull OfflineBan offlineBan) {
+            this.offlineBan = offlineBan;
+            this.enactedTime = Optional.ofNullable(offlineBan.getEnactedTime())
+                                       .orElseGet(Instant::now);
+        }
+
+        @Override
+        public @NotNull Instant sortBy() {
+            return enactedTime;
+        }
+
+        @Override
+        public Mono<Message> toMessage(MessageChannel channel) {
+            return channel.createEmbed(spec -> {
+                spec.setTitle("Pending Offline Ban")
+                    .setColor(Color.HOKI)
+                    .setTimestamp(enactedTime);
+
+                if (offlineBan.getPlayerName() != null)
+                    spec.addField("Name", offlineBan.getPlayerName(), false);
+
+                if (offlineBan.getReason() != null)
+                    spec.addField("Reason", offlineBan.getReason(), false);
+
+                if (offlineBan.getDuration() != null)
+                    spec.addField("Duration", offlineBan.getDuration().toString(), true);
+            });
         }
     }
 }
