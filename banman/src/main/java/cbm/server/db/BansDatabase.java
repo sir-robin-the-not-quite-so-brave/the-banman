@@ -51,6 +51,7 @@ import java.util.stream.StreamSupport;
 
 import static cbm.server.Utils.asyncMany;
 import static cbm.server.Utils.asyncOne;
+import static cbm.server.Utils.compare;
 import static java.util.stream.Collectors.toMap;
 import static jetbrains.exodus.core.crypto.MessageDigestUtil.MD5;
 
@@ -264,19 +265,6 @@ public class BansDatabase implements AutoCloseable {
                        .setPlayerName(playerName)
                        .setReason("Converted from broken NetID ban.")
                        .build();
-    }
-
-    private int compare(Duration duration1, Duration duration2) {
-        final boolean perma1 = duration1.isZero() || duration1.isNegative();
-        final boolean perma2 = duration2.isZero() || duration2.isNegative();
-
-        if (perma1 && perma2)
-            return 0;
-        if (perma1)
-            return 1;
-        if (perma2)
-            return -1;
-        return duration1.compareTo(duration2);
     }
 
     public boolean removeOfflineBanSync(SteamID steamID) {
@@ -707,43 +695,6 @@ public class BansDatabase implements AutoCloseable {
                            .add("id='" + id + "'")
                            .add("ban=" + ban)
                            .toString();
-        }
-    }
-
-    @SuppressWarnings("unused")
-    public static class BanInfo {
-        private final Ban ban;
-
-        public BanInfo(Ban ban) {
-            this.ban = ban;
-        }
-
-        public String getId() {
-            return ban.getId();
-        }
-
-        public String getEnactedTime() {
-            return ban.getEnactedTime().toString();
-        }
-
-        public String getDuration() {
-            return ban.getDuration().toString();
-        }
-
-        public String getIpPolicy() {
-            return ban.getIpPolicy();
-        }
-
-        public String getPlayerName() {
-            return ban.getPlayerName();
-        }
-
-        public String getReason() {
-            return ban.getReason();
-        }
-
-        public String getBannedUntil() {
-            return ban.getBannedUntil().toString();
         }
     }
 }
