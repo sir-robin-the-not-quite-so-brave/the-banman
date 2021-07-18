@@ -128,6 +128,7 @@ public class InfoCommand implements BotCommand {
         public final @NotNull Duration expectedDuration;
         public final @NotNull String reason;
         public final @Nullable String playerName;
+        private final @Nullable String ip;
 
         public BanInfo(@NotNull BanLogEntry start, @Nullable BanLogEntry end) {
             added = Optional.ofNullable(start.getBan().getEnactedTime()).orElseGet(start::getDetectedAt);
@@ -136,6 +137,11 @@ public class InfoCommand implements BotCommand {
             expectedDuration = Optional.ofNullable(start.getBan().getDuration()).orElse(Duration.ZERO);
             reason = Optional.ofNullable(start.getBan().getReason()).orElse("NetID ban.");
             playerName = start.getBan().getPlayerName();
+            ip = Optional.ofNullable(start.getBan().getIpPolicy())
+                         .filter(s -> s.startsWith("DENY,"))
+                         .map(s -> s.substring("DENY,".length()))
+                         .filter(s -> !s.equals("0.0.0.0"))
+                         .orElse(null);
         }
 
         @Override
@@ -147,7 +153,10 @@ public class InfoCommand implements BotCommand {
         public Mono<Message> toMessage(MessageChannel channel) {
             return channel.createEmbed(spec -> {
                 if (playerName != null)
-                    spec.addField("Name", playerName, false);
+                    spec.addField("Name", playerName, true);
+
+                if (ip != null)
+                    spec.addField("IP Address", ip, true);
 
                 spec.addField("Reason", reason, false)
                     .setTimestamp(added)
