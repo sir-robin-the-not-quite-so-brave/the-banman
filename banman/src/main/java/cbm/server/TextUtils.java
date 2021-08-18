@@ -1,6 +1,7 @@
 package cbm.server;
 
 import com.ibm.icu.text.Transliterator;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -13,7 +14,7 @@ public class TextUtils {
                                                                                   .mapToObj(i -> (char) i)
                                                                                   .collect(Collectors.toSet());
 
-    public static String printable(String s) {
+    public static @NotNull String printable(@NotNull String s) {
         final String transformed = TRANSLITERATOR.transform(s);
 
         final var sb = new StringBuilder();

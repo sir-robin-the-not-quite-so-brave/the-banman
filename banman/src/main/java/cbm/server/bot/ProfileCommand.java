@@ -3,6 +3,7 @@ package cbm.server.bot;
 import cbm.server.Bot;
 import cbm.server.SteamID;
 import cbm.server.SteamWeb;
+import cbm.server.TextUtils;
 import discord4j.core.object.entity.Message;
 import discord4j.core.spec.EmbedCreateSpec;
 import discord4j.rest.util.Color;
@@ -10,6 +11,8 @@ import org.jetbrains.annotations.NotNull;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
 import reactor.core.publisher.Flux;
+
+import java.util.Optional;
 
 import static cbm.server.SteamWeb.playerProfile;
 
@@ -40,8 +43,14 @@ public class ProfileCommand implements BotCommand {
         spec.setUrl(profile.getUrl())
             .setTitle(profile.getName())
             .setThumbnail(profile.getAvatar())
-            .setColor(Color.SUMMER_SKY)
+            .setColor(Color.of((int) steamID.steamID64()))
             .addField("Steam ID64", "`" + steamID.steamID64() + "`", true)
             .addField("Steam ID", "`" + steamID.steamID() + "`", true);
+
+        Optional.ofNullable(profile.getName())
+                .map(TextUtils::printable)
+                .filter(s -> !s.isBlank())
+                .filter(s -> !s.equals(profile.getName()))
+                .ifPresent(s -> spec.addField("Readable name", s, false));
     }
 }
