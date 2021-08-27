@@ -87,4 +87,8 @@ public final class SteamID {
     public String netIDAsString() {
         return String.format("0x%016X", steamID64());
     }
+
+    public String fallbackPlayerName() {
+        return "player_" + uid();
+    }
 }

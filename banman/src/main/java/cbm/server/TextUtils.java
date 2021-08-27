@@ -22,6 +22,6 @@ public class TextUtils {
             if (ch < 256 && !Character.isISOControl(ch) && !ILLEGAL_CHARACTER_SET.contains(ch))
                 sb.append(ch);
 
-        return sb.toString().trim();
+        return sb.toString().strip();
     }
 }

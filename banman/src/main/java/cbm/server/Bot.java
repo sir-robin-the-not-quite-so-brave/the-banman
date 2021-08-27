@@ -276,7 +276,9 @@ public class Bot implements Callable<Integer> {
     public static Mono<String> getPlayerName(@NotNull SteamID steamID) {
         return SteamWeb.playerProfile(steamID.profileUrl())
                        .map(SteamWeb.Profile::getName)
-                       .map(TextUtils::printable);
+                       .map(TextUtils::printable)
+                       .filter(s -> !s.isBlank())
+                       .defaultIfEmpty(steamID.fallbackPlayerName());
     }
 
     @Command(header = "Chivalry Ban Manager%n")
