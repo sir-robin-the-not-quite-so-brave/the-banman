@@ -88,7 +88,7 @@ public class Bot implements Callable<Integer> {
                 bansDatabase.clearMentionsData();
 
             executorService.scheduleAtFixedRate(() -> updateBans(logDownloader, bansDatabase),
-                                                10, 3600, TimeUnit.SECONDS);
+                                                10, 600, TimeUnit.SECONDS);
             executorService.scheduleAtFixedRate(() -> {
                 LOGGER.info("Backing up the database ...");
                 try {
@@ -183,7 +183,7 @@ public class Bot implements Callable<Integer> {
         final Instant lastUpdate = bansDatabase.getLastUpdateSync();
         LOGGER.info("Database is last updated at: {}", lastUpdate);
         final Instant now = Instant.now();
-        if (lastUpdate != null && now.isBefore(lastUpdate.plus(1, ChronoUnit.HOURS))) {
+        if (lastUpdate != null && now.isBefore(lastUpdate.plus(10, ChronoUnit.MINUTES))) {
             LOGGER.info("Database is up-to-date");
             return;
         }
