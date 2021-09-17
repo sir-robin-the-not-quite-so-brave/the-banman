@@ -4,10 +4,13 @@ import cbm.server.SteamID;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 import java.util.StringJoiner;
 
 public class Ban {
+    private static final Duration SHORT_BAN_DURATION = Duration.of(5, ChronoUnit.MINUTES);
+
     private final String id;
     private final Instant enactedTime;
     private final Duration duration;
@@ -22,6 +25,12 @@ public class Ban {
         this.ipPolicy = builder.ipPolicy;
         this.playerName = builder.playerName;
         this.reason = builder.reason;
+    }
+
+    public boolean isShortBan() {
+        return duration != null
+                && duration.compareTo(Duration.ZERO) > 0
+                && duration.compareTo(SHORT_BAN_DURATION) < 0;
     }
 
     @Override

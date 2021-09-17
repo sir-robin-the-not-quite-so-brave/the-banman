@@ -17,7 +17,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
-import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Predicate;
@@ -27,8 +26,6 @@ import java.util.stream.Collectors;
         description = {"%nShow the ban history either for a player or for a date. By default," +
                                " hide bans shorter than 5 minutes. To show them too add the -a option.%n"})
 public class LogCommand implements BotCommand {
-
-    private static final Duration MIN_BAN_DURATION = Duration.of(5, ChronoUnit.MINUTES);
 
     @Option(names = "-p", description = "Force the parameter to be treated as player ID")
     private boolean asPlayer;
@@ -109,13 +106,7 @@ public class LogCommand implements BotCommand {
     }
 
     private Predicate<BanLogEntry> getBanFilter() {
-        return banLogEntry -> {
-            final Duration duration = banLogEntry.getBan().getDuration();
-            return showAllBans
-                           || duration == null
-                           || duration.compareTo(Duration.ZERO) <= 0
-                           || duration.compareTo(MIN_BAN_DURATION) >= 0;
-        };
+        return banLogEntry -> showAllBans || !banLogEntry.getBan().isShortBan();
     }
 
     private List<String> toString(String header, List<BanLogEntry> banHistory) {

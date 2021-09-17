@@ -144,8 +144,10 @@ public class BansDatabase implements AutoCloseable {
 
         return entityStore.computeInTransaction(txn -> {
             final Map<String, Entity> currentBans = new HashMap<>();
-            final AtomicInteger added = new AtomicInteger();
-            final AtomicInteger removed = new AtomicInteger();
+            final AtomicInteger addedLong = new AtomicInteger();
+            final AtomicInteger addedShort = new AtomicInteger();
+            final AtomicInteger removedLong = new AtomicInteger();
+            final AtomicInteger removedShort = new AtomicInteger();
 
             for (Entity banned : txn.getAll(CURRENT_BAN)) {
                 final String id = getProperty(banned, "player-id");
@@ -155,9 +157,10 @@ public class BansDatabase implements AutoCloseable {
                     final Entity removeLog = txn.newEntity(LOG_ENTRY);
                     setProperty(removeLog, "detected-at", timestamp);
                     setProperty(removeLog, "action", "remove");
-                    saveBan(asBan(banned), removeLog);
+                    final Ban ban = asBan(banned);
+                    saveBan(ban, removeLog);
 
-                    removed.incrementAndGet();
+                    (ban.isShortBan() ? removedShort : removedLong).incrementAndGet();
 
                     banned.delete();
                 }
@@ -175,7 +178,7 @@ public class BansDatabase implements AutoCloseable {
                     setProperty(removeLog, "action", "remove");
                     saveBan(asBan(entity), removeLog);
 
-                    removed.incrementAndGet();
+                    (ban.isShortBan() ? removedShort : removedLong).incrementAndGet();
 
                     entity.delete();
                     currentBans.remove(ban.getId());
@@ -186,7 +189,7 @@ public class BansDatabase implements AutoCloseable {
                 setProperty(log, "action", "add");
                 saveBan(ban, log);
 
-                added.incrementAndGet();
+                (ban.isShortBan() ? addedShort : addedLong).incrementAndGet();
 
                 saveBan(ban, txn.newEntity(CURRENT_BAN));
                 addedBans.add(new UniqueBan(ban));
@@ -222,13 +225,23 @@ public class BansDatabase implements AutoCloseable {
 
             return new Stats() {
                 @Override
-                public int numAdded() {
-                    return added.get();
+                public int numAddedLong() {
+                    return addedLong.get();
                 }
 
                 @Override
-                public int numRemoved() {
-                    return removed.get();
+                public int numRemovedLong() {
+                    return removedLong.get();
+                }
+
+                @Override
+                public int numAddedShort() {
+                    return addedShort.get();
+                }
+
+                @Override
+                public int numRemovedShort() {
+                    return removedShort.get();
                 }
             };
         });
@@ -447,24 +460,33 @@ public class BansDatabase implements AutoCloseable {
     }
 
     private BanLogEntry asBanLogEntry(Entity entity) {
-        final Instant detectedAt = getProperty(entity, "detected-at");
-        final String action = getProperty(entity, "action");
+        final Instant detectedAt = Objects.requireNonNull(getProperty(entity, "detected-at"));
+        final String action = Objects.requireNonNull(getProperty(entity, "action"));
         final Ban ban = asBan(entity);
 
         return new BanLogEntry() {
             @Override
-            public Instant getDetectedAt() {
+            public @NotNull Instant getDetectedAt() {
                 return detectedAt;
             }
 
             @Override
-            public String getAction() {
+            public @NotNull String getAction() {
                 return action;
             }
 
             @Override
-            public Ban getBan() {
+            public @NotNull Ban getBan() {
                 return ban;
+            }
+
+            @Override
+            public String toString() {
+                return new StringJoiner(", ", BanLogEntry.class.getSimpleName() + "[", "]")
+                        .add("detectedAt='" + detectedAt + "'")
+                        .add("action=" + action)
+                        .add("ban=" + ban)
+                        .toString();
             }
         };
     }
@@ -645,17 +667,29 @@ public class BansDatabase implements AutoCloseable {
 
     @SuppressWarnings("unused")
     public interface BanLogEntry {
-        Instant getDetectedAt();
+        @NotNull Instant getDetectedAt();
 
-        String getAction();
+        @NotNull String getAction();
 
-        Ban getBan();
+        @NotNull Ban getBan();
     }
 
     public interface Stats {
-        int numAdded();
+        int numAddedLong();
 
-        int numRemoved();
+        int numRemovedLong();
+
+        int numAddedShort();
+
+        int numRemovedShort();
+
+        default int numAdded() {
+            return numAddedLong() + numAddedShort();
+        }
+
+        default int numRemoved() {
+            return numRemovedLong() + numRemovedShort();
+        }
     }
 
     static class UniqueBan {

@@ -33,7 +33,7 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.util.function.Tuple2;
+import reactor.util.function.Tuple4;
 import reactor.util.function.Tuples;
 
 import java.io.File;
@@ -215,8 +215,10 @@ public class Bot implements Callable<Integer> {
     private void showStats(EmbedCreateSpec spec, BansDatabase.Stats stats, int offlineBans, Configuration conf) {
         spec.setTitle("Ban stats")
             .setColor(Color.VIVID_VIOLET)
-            .addField("Added bans", Integer.toString(stats.numAdded()), true)
-            .addField("Removed bans", Integer.toString(stats.numRemoved()), true)
+            .addField("Added long bans", Integer.toString(stats.numAddedLong()), true)
+            .addField("Added short bans", Integer.toString(stats.numAddedShort()), true)
+            .addField("Removed long bans", Integer.toString(stats.numRemovedLong()), true)
+            .addField("Removed short bans", Integer.toString(stats.numRemovedShort()), true)
             .addField("Offline bans", Integer.toString(offlineBans), true);
 
         if (offlineBans > 0)
@@ -235,16 +237,18 @@ public class Bot implements Callable<Integer> {
     }
 
     private BansDatabase.Stats stats(List<BansDatabase.BanLogEntry> logEntries) {
-        final Tuple2<Integer, Integer> stats =
+        final Tuple4<Integer, Integer, Integer, Integer> stats =
                 logEntries.stream()
-                          .reduce(Tuples.of(0, 0),
+                          .reduce(Tuples.of(0, 0, 0, 0),
                                   (st, entry) -> {
                                       switch (entry.getAction()) {
                                           case "add":
-                                              return st.mapT1(n -> n + 1);
+                                              return entry.getBan().isShortBan() ? st.mapT3(n -> n + 1)
+                                                                                 : st.mapT1(n -> n + 1);
 
                                           case "remove":
-                                              return st.mapT2(n -> n + 1);
+                                              return entry.getBan().isShortBan() ? st.mapT4(n -> n + 1)
+                                                                                 : st.mapT2(n -> n + 1);
 
                                           default:
                                               LOGGER.error("Unknown log entry action: {}", entry.getAction());
@@ -252,17 +256,29 @@ public class Bot implements Callable<Integer> {
                                       }
                                   },
                                   (st1, st2) -> Tuples.of(st1.getT1() + st2.getT1(),
-                                                          st1.getT2() + st2.getT2()));
+                                                          st1.getT2() + st2.getT2(),
+                                                          st1.getT3() + st2.getT3(),
+                                                          st1.getT4() + st2.getT4()));
 
         return new BansDatabase.Stats() {
             @Override
-            public int numAdded() {
+            public int numAddedLong() {
                 return stats.getT1();
             }
 
             @Override
-            public int numRemoved() {
+            public int numRemovedLong() {
                 return stats.getT2();
+            }
+
+            @Override
+            public int numAddedShort() {
+                return stats.getT3();
+            }
+
+            @Override
+            public int numRemovedShort() {
+                return stats.getT4();
             }
         };
     }
